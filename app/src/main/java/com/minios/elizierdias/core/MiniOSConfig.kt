@@ -143,25 +143,4 @@ class MiniOSConfig(
                 ""
         }
     }
-}        }
-
-    suspend fun setWallpaper(id: String) {
-        context.dataStore.edit {
-            it[ConfigKeys.WALLPAPER_ID] = id
-            it[ConfigKeys.WALLPAPER_URI] = ""
-        }
-    }
-
-    suspend fun setWallpaperUri(uri: String) {
-        context.dataStore.edit {
-            it[ConfigKeys.WALLPAPER_ID] = "custom_photo"
-            it[ConfigKeys.WALLPAPER_URI] = uri
-        }
-    }
-
-    suspend fun setPowerMode(mode: PowerMode) {
-        context.dataStore.edit {
-            it[ConfigKeys.POWER_MODE] = mode.name
-        }
-    }
 }
