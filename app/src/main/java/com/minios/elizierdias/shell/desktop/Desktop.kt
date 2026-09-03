@@ -33,6 +33,7 @@ import com.minios.elizierdias.shell.startmenu.StartMenu
 import com.minios.elizierdias.shell.taskbar.Taskbar
 import com.minios.elizierdias.window.frame.WindowFrame
 import com.minios.elizierdias.window.manager.WindowManager
+import java.io.File
 
 @Composable
 fun Desktop() {
@@ -44,7 +45,7 @@ fun Desktop() {
     val wallpaper = Wallpapers.byId(wallpaperId)
     var startMenuOpen by remember { mutableStateOf(false) }
     var desktopSizePx by remember { mutableStateOf(Size(1280f, 720f)) }
-    var lastClickHint by remember { mutableStateOf("toque curto = ESQ · longo = DIR") }
+    var lastClickHint by remember { mutableStateOf("1 clique = ESQ · 2 = DIR") }
     val iconLayout = remember {
         AppRegistry.all.mapIndexed { i, app -> app to Offset(24f, 24f + i * 88f) }
     }
@@ -60,13 +61,19 @@ fun Desktop() {
         if (startMenuOpen) startMenuOpen = false
     }
 
+    val wallpaperData: Any? = remember(wallpaperUri) {
+        if (wallpaperUri.isEmpty()) null
+        else if (wallpaperUri.startsWith("/")) File(wallpaperUri)
+        else wallpaperUri
+    }
+
     Box(Modifier.fillMaxSize().onSizeChanged {
         desktopSizePx = Size(it.width.toFloat(), it.height.toFloat())
     }) {
-        if (wallpaperUri.isNotEmpty()) {
+        if (wallpaperData != null) {
             Image(
                 painter = rememberAsyncImagePainter(
-                    ImageRequest.Builder(context).data(wallpaperUri).crossfade(true).build()
+                    ImageRequest.Builder(context).data(wallpaperData).crossfade(true).build()
                 ),
                 contentDescription = "Wallpaper",
                 modifier = Modifier.fillMaxSize(),
@@ -125,7 +132,6 @@ fun Desktop() {
 
         VirtualMouseOverlay(
             enabled = true,
-            pointerOffset = Offset(-20f, -52f),
             onClick = { pos, button -> handleMouseClick(pos, button) },
         )
     }
