@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import java.io.File
@@ -104,8 +105,9 @@ fun AnimatedWallpaper(
             return@Canvas
         }
 
-        // Mantém proporção e preenche todo o desktop.
-        // O GIF é cortado nas bordas, nunca esticado.
+        // Mantém a proporção original.
+        // O GIF preenche toda a área e é cortado
+        // nas bordas quando necessário.
         val scale =
             maxOf(
                 size.width / sourceWidth,
