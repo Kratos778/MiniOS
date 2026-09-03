@@ -3,10 +3,22 @@ package com.minios.elizierdias.shell.desktop
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
@@ -19,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.minios.elizierdias.apps.AppRegistry
+import com.minios.elizierdias.apps.browser.BrowserApp
 import com.minios.elizierdias.apps.files.FilesApp
 import com.minios.elizierdias.apps.settings.SettingsApp
 import com.minios.elizierdias.apps.softwarecenter.SoftwareCenterApp
@@ -37,86 +50,89 @@ fun Desktop() {
 
     val context = LocalContext.current
 
-    val config = remember(context) {
-        MiniOSConfig(context)
-    }
+    val config =
+        remember(context) {
+            MiniOSConfig(context)
+        }
 
-    val windowManager = remember {
-        WindowManager()
-    }
+    val windowManager =
+        remember {
+            WindowManager()
+        }
 
-    val wallpaperId by config.wallpaperId.collectAsState(
-        initial = "default_gradient"
-    )
+    val wallpaperId by
+        config.wallpaperId.collectAsState(
+            initial = "default_gradient",
+        )
 
-    val wallpaperUri by config.wallpaperUri.collectAsState(
-        initial = ""
-    )
+    val wallpaperUri by
+        config.wallpaperUri.collectAsState(
+            initial = "",
+        )
 
     val wallpaper =
         Wallpapers.byId(wallpaperId)
 
-    var startMenuOpen by remember {
-        mutableStateOf(false)
-    }
+    var startMenuOpen by
+        remember {
+            mutableStateOf(false)
+        }
 
-    var desktopSizePx by remember {
-        mutableStateOf(
-            Size(
-                width = 1280f,
-                height = 720f
+    var desktopSizePx by
+        remember {
+            mutableStateOf(
+                Size(
+                    1280f,
+                    720f,
+                )
             )
-        )
-    }
+        }
 
-    val wallpaperFile =
+    val wallpaperData: Any? =
         remember(wallpaperUri) {
+            when {
+                wallpaperUri.isEmpty() ->
+                    null
 
-            if (
-                wallpaperUri.isNotEmpty() &&
-                wallpaperUri.startsWith("/")
-            ) {
-                File(wallpaperUri)
-            } else {
-                null
+                wallpaperUri.startsWith("/") ->
+                    File(wallpaperUri)
+
+                else ->
+                    wallpaperUri
             }
         }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .onSizeChanged { size ->
-
+            .onSizeChanged {
                 desktopSizePx =
                     Size(
-                        width = size.width.toFloat(),
-                        height = size.height.toFloat()
+                        it.width.toFloat(),
+                        it.height.toFloat(),
                     )
-            }
+            },
     ) {
 
-        /*
-         * Wallpaper
-         */
-
-        if (wallpaperFile != null) {
+        if (wallpaperData != null) {
 
             Image(
-                painter = rememberAsyncImagePainter(
-                    model = ImageRequest.Builder(context)
-                        .data(wallpaperFile)
-                        .memoryCacheKey(
-                            "minios_wallpaper_$wallpaperUri"
-                        )
-                        .diskCacheKey(
-                            "minios_wallpaper_$wallpaperUri"
-                        )
-                        .crossfade(true)
-                        .build()
-                ),
+                painter =
+                    rememberAsyncImagePainter(
+                        ImageRequest.Builder(context)
+                            .data(wallpaperData)
+                            .memoryCacheKey(
+                                wallpaperUri,
+                            )
+                            .diskCacheKey(
+                                wallpaperUri,
+                            )
+                            .crossfade(true)
+                            .build(),
+                    ),
                 contentDescription = "Wallpaper",
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
             )
 
         } else {
@@ -124,44 +140,36 @@ fun Desktop() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(wallpaper.brush)
+                    .background(
+                        wallpaper.brush,
+                    ),
             )
         }
 
-        /*
-         * Desktop icons
-         */
-
         Column(
-            modifier = Modifier
-                .padding(16.dp),
+            modifier = Modifier.padding(16.dp),
             verticalArrangement =
-                Arrangement.spacedBy(18.dp)
+                Arrangement.spacedBy(18.dp),
         ) {
 
             AppRegistry.all.forEach { app ->
 
-                DesktopIcon(
-                    app = app,
-                    onOpen = {
+                DesktopIcon(app) {
 
-                        startMenuOpen = false
+                    startMenuOpen = false
 
-                        windowManager.openApp(
-                            app,
-                            desktopSizePx
-                        )
-                    }
-                )
+                    windowManager.openApp(
+                        app,
+                        desktopSizePx,
+                    )
+                }
             }
         }
 
-        /*
-         * Application windows
-         */
-
         windowManager.windows
-            .sortedBy { it.zIndex }
+            .sortedBy {
+                it.zIndex
+            }
             .forEach { window ->
 
                 if (!window.isMinimized) {
@@ -171,82 +179,75 @@ fun Desktop() {
 
                         onFocus = {
                             windowManager.focus(
-                                window.instanceId
+                                window.instanceId,
                             )
                         },
 
                         onMove = { position ->
                             windowManager.move(
                                 window.instanceId,
-                                position
+                                position,
                             )
                         },
 
                         onResize = { size ->
                             windowManager.resize(
                                 window.instanceId,
-                                size
+                                size,
                             )
                         },
 
                         onClose = {
                             windowManager.close(
-                                window.instanceId
+                                window.instanceId,
                             )
                         },
 
                         onMinimize = {
                             windowManager.minimize(
-                                window.instanceId
+                                window.instanceId,
                             )
                         },
 
                         onToggleMaximize = {
                             windowManager.toggleMaximize(
                                 window.instanceId,
-                                desktopSizePx
+                                desktopSizePx,
                             )
-                        }
+                        },
                     ) {
 
                         when (window.app.id) {
 
-                            "files" -> {
+                            "files" ->
                                 FilesApp()
-                            }
 
-                            "terminal" -> {
+                            "terminal" ->
                                 TerminalApp()
-                            }
 
-                            "settings" -> {
+                            "settings" ->
                                 SettingsApp()
-                            }
 
-                            "software_center" -> {
+                            "software_center" ->
                                 SoftwareCenterApp()
-                            }
 
-                            else -> {
+                            "browser" ->
+                                BrowserApp()
+
+                            else ->
                                 Text(
-                                    text =
-                                        "App: ${window.app.id}",
-                                    color = Color.White
+                                    "App: ${window.app.id}",
+                                    color = Color.White,
                                 )
-                            }
                         }
                     }
                 }
             }
 
-        /*
-         * Taskbar
-         */
-
         Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth()
+                .fillMaxWidth(),
         ) {
 
             Taskbar(
@@ -271,20 +272,13 @@ fun Desktop() {
                         window.isFocused &&
                         !window.isMinimized
                     ) {
-
                         windowManager.minimize(id)
-
                     } else {
-
                         windowManager.restore(id)
                     }
-                }
+                },
             )
         }
-
-        /*
-         * Start Menu
-         */
 
         if (startMenuOpen) {
 
@@ -297,13 +291,13 @@ fun Desktop() {
 
                     windowManager.openApp(
                         app,
-                        desktopSizePx
+                        desktopSizePx,
                     )
                 },
 
                 onDismiss = {
                     startMenuOpen = false
-                }
+                },
             )
         }
     }
@@ -312,7 +306,7 @@ fun Desktop() {
 @Composable
 private fun DesktopIcon(
     app: MiniApp,
-    onOpen: () -> Unit
+    onOpen: () -> Unit,
 ) {
 
     Column(
@@ -322,24 +316,24 @@ private fun DesktopIcon(
                 onOpen()
             },
         horizontalAlignment =
-            Alignment.CenterHorizontally
+            Alignment.CenterHorizontally,
     ) {
 
         Icon(
             imageVector = app.icon,
             contentDescription = app.title,
             tint = Color.White,
-            modifier = Modifier.size(30.dp)
+            modifier = Modifier.size(30.dp),
         )
 
         Spacer(
-            modifier = Modifier.height(4.dp)
+            modifier = Modifier.height(4.dp),
         )
 
         Text(
             text = app.title,
             color = Color.White,
-            fontSize = 11.sp
+            fontSize = 11.sp,
         )
     }
 }
