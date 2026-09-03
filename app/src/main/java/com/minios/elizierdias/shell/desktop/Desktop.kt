@@ -1,5 +1,6 @@
 package com.minios.elizierdias.shell.desktop
 
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
