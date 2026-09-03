@@ -50,14 +50,12 @@ import java.util.Locale
 @Composable
 fun Taskbar(
     openWindows: List<MiniWindow>,
+    mouseEnabled: Boolean,
+    onMouseToggle: (Boolean) -> Unit,
     onStartClick: () -> Unit,
     onWindowClick: (String) -> Unit,
 ) {
     val context = LocalContext.current
-
-    var mouseEnabled by remember {
-        mutableStateOf(false)
-    }
 
     var batteryLevel by remember {
         mutableIntStateOf(readBatteryLevel(context))
@@ -290,6 +288,10 @@ fun Taskbar(
 
         /*
          * MOUSE
+         *
+         * O estado pertence ao Desktop.
+         * A Taskbar apenas exibe o estado
+         * e solicita a alteração.
          */
         Row(
             modifier = Modifier
@@ -304,8 +306,7 @@ fun Taskbar(
                     }
                 )
                 .clickable {
-                    mouseEnabled =
-                        !mouseEnabled
+                    onMouseToggle(!mouseEnabled)
                 }
                 .padding(
                     horizontal = 7.dp,
