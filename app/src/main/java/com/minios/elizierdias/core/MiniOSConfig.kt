@@ -16,19 +16,25 @@ object ConfigKeys {
 }
 
 class MiniOSConfig(private val context: Context) {
-    val wallpaperId: Flow<String> = context.dataStore.data.map {
-        it[ConfigKeys.WALLPAPER_ID] ?: "default_gradient"
-    }
-    val wallpaperUri: Flow<String> = context.dataStore.data.map {
-        it[ConfigKeys.WALLPAPER_URI] ?: ""
-    }
-    val powerMode: Flow<PowerMode> = context.dataStore.data.map {
-        when (it[ConfigKeys.POWER_MODE]) {
-            "PERFORMANCE" -> PowerMode.PERFORMANCE
-            "BATTERY_SAVER" -> PowerMode.BATTERY_SAVER
-            else -> PowerMode.BALANCED
+
+    val wallpaperId: Flow<String> =
+        context.dataStore.data.map {
+            it[ConfigKeys.WALLPAPER_ID] ?: "default_gradient"
         }
-    }
+
+    val wallpaperUri: Flow<String> =
+        context.dataStore.data.map {
+            it[ConfigKeys.WALLPAPER_URI] ?: ""
+        }
+
+    val powerMode: Flow<PowerMode> =
+        context.dataStore.data.map {
+            when (it[ConfigKeys.POWER_MODE]) {
+                "PERFORMANCE" -> PowerMode.PERFORMANCE
+                "BATTERY_SAVER" -> PowerMode.BATTERY_SAVER
+                else -> PowerMode.BALANCED
+            }
+        }
 
     suspend fun setWallpaper(id: String) {
         context.dataStore.edit {
@@ -39,12 +45,14 @@ class MiniOSConfig(private val context: Context) {
 
     suspend fun setWallpaperUri(uri: String) {
         context.dataStore.edit {
-            it[ConfigKeys.WALLPAPER_URI] = uri
             it[ConfigKeys.WALLPAPER_ID] = "custom_photo"
+            it[ConfigKeys.WALLPAPER_URI] = uri
         }
     }
 
     suspend fun setPowerMode(mode: PowerMode) {
-        context.dataStore.edit { it[ConfigKeys.POWER_MODE] = mode.name }
+        context.dataStore.edit {
+            it[ConfigKeys.POWER_MODE] = mode.name
+        }
     }
 }
