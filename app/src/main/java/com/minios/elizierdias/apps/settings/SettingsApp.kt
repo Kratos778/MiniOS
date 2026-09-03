@@ -1,6 +1,6 @@
 package com.minios.elizierdias.apps.settings
 
-import android.content.Intent
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,105 +32,236 @@ fun SettingsApp() {
     val context = LocalContext.current
     val config = remember(context) { MiniOSConfig(context) }
     val scope = rememberCoroutineScope()
-    val wallpaper by config.wallpaperId.collectAsState(initial = "default_gradient")
-    val wallpaperUri by config.wallpaperUri.collectAsState(initial = "")
-    val power by config.powerMode.collectAsState(initial = PowerMode.BALANCED)
-    var statusMsg by remember { mutableStateOf("") }
+
+    val wallpaper by config.wallpaperId.collectAsState(
+        initial = "default_gradient"
+    )
+
+    val wallpaperUri by config.wallpaperUri.collectAsState(
+        initial = ""
+    )
+
+    val power by config.powerMode.collectAsState(
+        initial = PowerMode.BALANCED
+    )
+
+    var statusMsg by remember {
+        mutableStateOf("")
+    }
 
     val pickImage = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
+
         if (uri == null) {
             statusMsg = "Nenhuma foto escolhida"
             return@rememberLauncherForActivityResult
         }
+
         scope.launch {
             statusMsg = "A guardar wallpaper..."
-            val saved = withContext(Dispatchers.IO) {
+
+            val savedPath = withContext(Dispatchers.IO) {
                 try {
-                    val dest = File(context.filesDir, "wallpaper_custom.jpg")
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        dest.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    try {
-                        context.contentResolver.takePersistableUriPermission(
-                            uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                        )
-                    } catch (_: Exception) { }
-                    dest.absolutePath
-                } catch (e: Exception) {
+                    saveWallpaper(context, uri)
+                } catch (_: Exception) {
                     null
                 }
             }
-            if (saved != null) {
-                config.setWallpaperUri(saved)
-                statusMsg = "Wallpaper de foto ativo"
+
+            if (savedPath != null) {
+                config.setWallpaperUri(savedPath)
+                statusMsg = "Wallpaper personalizado ativo"
             } else {
                 statusMsg = "Erro ao guardar a foto"
             }
         }
     }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFF0D1117)).padding(16.dp)) {
-        Text("Wallpaper", color = Color(0xFFC9D1D9), fontSize = 14.sp)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0D1117))
+            .padding(16.dp)
+    ) {
+
+        Text(
+            "Wallpaper",
+            color = Color(0xFFC9D1D9),
+            fontSize = 14.sp
+        )
+
         Spacer(Modifier.height(8.dp))
+
         Row {
+
             Wallpapers.all.forEach { wp ->
+
                 Box(
-                    Modifier.padding(end = 8.dp).size(56.dp).clip(RoundedCornerShape(8.dp))
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(wp.previewColor)
                         .clickable {
+
                             scope.launch {
                                 config.setWallpaper(wp.id)
-                                statusMsg = "Gradiente: ${wp.id}"
+
+                                statusMsg =
+                                    "Wallpaper: ${wp.id}"
                             }
                         },
-                    contentAlignment = Alignment.Center,
+                    contentAlignment = Alignment.Center
                 ) {
-                    if (wp.id == wallpaper && wallpaperUri.isEmpty()) {
-                        Text("OK", color = Color.White, fontSize = 14.sp)
+
+                    if (
+                        wp.id == wallpaper &&
+                        wallpaperUri.isEmpty()
+                    ) {
+                        Text(
+                            "OK",
+                            color = Color.White,
+                            fontSize = 14.sp
+                        )
                     }
                 }
             }
         }
+
         Spacer(Modifier.height(12.dp))
-        Button(onClick = {
-            statusMsg = ""
-            pickImage.launch("image/*")
-        }) {
+
+        Button(
+            onClick = {
+                statusMsg = ""
+                pickImage.launch("image/*")
+            }
+        ) {
             Text("Escolher foto da galeria")
         }
+
         if (wallpaperUri.isNotEmpty()) {
+
             Spacer(Modifier.height(6.dp))
-            Text("Foto personalizada ativa", color = Color(0xFF3FB950), fontSize = 12.sp)
+
+            Text(
+                "Foto personalizada ativa",
+                color = Color(0xFF3FB950),
+                fontSize = 12.sp
+            )
         }
+
         if (statusMsg.isNotEmpty()) {
-            Text(statusMsg, color = Color(0xFF8B949E), fontSize = 11.sp)
+
+            Spacer(Modifier.height(4.dp))
+
+            Text(
+                statusMsg,
+                color = Color(0xFF8B949E),
+                fontSize = 11.sp
+            )
         }
 
         Spacer(Modifier.height(24.dp))
-        Text("Desempenho", color = Color(0xFFC9D1D9), fontSize = 14.sp)
+
+        Text(
+            "Desempenho",
+            color = Color(0xFFC9D1D9),
+            fontSize = 14.sp
+        )
+
         Spacer(Modifier.height(8.dp))
+
         PowerMode.entries.forEach { mode ->
+
             Row(
-                Modifier.fillMaxWidth().clickable { scope.launch { config.setPowerMode(mode) } }
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        scope.launch {
+                            config.setPowerMode(mode)
+                        }
+                    }
                     .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                RadioButton(selected = power == mode, onClick = { scope.launch { config.setPowerMode(mode) } })
+
+                RadioButton(
+                    selected = power == mode,
+                    onClick = {
+                        scope.launch {
+                            config.setPowerMode(mode)
+                        }
+                    }
+                )
+
                 Text(
                     when (mode) {
                         PowerMode.PERFORMANCE -> "Performance"
                         PowerMode.BALANCED -> "Balanced"
                         PowerMode.BATTERY_SAVER -> "Battery Saver"
                     },
-                    color = Color(0xFFC9D1D9), fontSize = 13.sp,
+                    color = Color(0xFFC9D1D9),
+                    fontSize = 13.sp
                 )
             }
         }
+
         Spacer(Modifier.height(24.dp))
-        Text("Sobre", color = Color(0xFFC9D1D9), fontSize = 14.sp)
-        Text("MiniOS 0.1.0 · com.minios.elizierdias.debug", color = Color(0xFF8B949E), fontSize = 12.sp)
-        Text("Toque normal · Wallpaper landscape · Files com armazenamento", color = Color(0xFF8B949E), fontSize = 11.sp)
+
+        Text(
+            "Sobre",
+            color = Color(0xFFC9D1D9),
+            fontSize = 14.sp
+        )
+
+        Text(
+            "MiniOS 0.2.0",
+            color = Color(0xFF8B949E),
+            fontSize = 12.sp
+        )
+
+        Text(
+            "Wallpaper persistente · Desktop landscape",
+            color = Color(0xFF8B949E),
+            fontSize = 11.sp
+        )
     }
+}
+
+private fun saveWallpaper(
+    context: Context,
+    uri: Uri
+): String {
+
+    val directory = File(
+        context.filesDir,
+        "wallpapers"
+    )
+
+    if (!directory.exists()) {
+        directory.mkdirs()
+    }
+
+    val filename =
+        "wallpaper_${System.currentTimeMillis()}.jpg"
+
+    val destination =
+        File(directory, filename)
+
+    context.contentResolver
+        .openInputStream(uri)
+        ?.use { input ->
+
+            destination.outputStream()
+                .use { output ->
+
+                    input.copyTo(output)
+                }
+        }
+        ?: throw IllegalStateException(
+            "Não foi possível ler a imagem"
+        )
+
+    return destination.absolutePath
 }
