@@ -7,17 +7,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 
 @Composable
 fun AnimatedWallpaper(
@@ -30,13 +26,12 @@ fun AnimatedWallpaper(
         mutableStateOf<Movie?>(null)
     }
 
-    var startTime by remember(source) {
-        mutableLongStateOf(System.currentTimeMillis())
+    var animationTime by remember(source) {
+        mutableLongStateOf(0L)
     }
 
     LaunchedEffect(source) {
         movie = null
-        startTime = System.currentTimeMillis()
 
         try {
             val bytes = when {
@@ -50,21 +45,6 @@ fun AnimatedWallpaper(
                             android.net.Uri.parse(source)
                         )
                         ?.use { it.readBytes() }
-                }
-
-                source.startsWith("http://") ||
-                source.startsWith("https://") -> {
-                    val connection =
-                        URL(source)
-                            .openConnection() as HttpURLConnection
-
-                    connection.connectTimeout = 10_000
-                    connection.readTimeout = 15_000
-                    connection.connect()
-
-                    connection.inputStream.use {
-                        it.readBytes()
-                    }
                 }
 
                 else -> null
@@ -82,14 +62,22 @@ fun AnimatedWallpaper(
         }
     }
 
-    if (movie == null) {
-        return
+    LaunchedEffect(movie) {
+        if (movie == null) return@LaunchedEffect
+
+        while (true) {
+            animationTime =
+                System.currentTimeMillis()
+
+            delay(16L)
+        }
     }
 
     Canvas(
         modifier = modifier.fillMaxSize(),
     ) {
-        val currentMovie = movie ?: return@Canvas
+        val currentMovie =
+            movie ?: return@Canvas
 
         val duration =
             currentMovie.duration()
@@ -97,71 +85,49 @@ fun AnimatedWallpaper(
                 ?: 1000
 
         val elapsed =
-            (
-                System.currentTimeMillis() -
-                    startTime
-            ).toInt()
+            animationTime % duration
 
-        val frameTime =
-            elapsed % duration
+        currentMovie.setTime(
+            elapsed.toInt()
+        )
 
-        currentMovie.setTime(frameTime)
-
-        val movieWidth =
+        val sourceWidth =
             currentMovie.width().toFloat()
 
-        val movieHeight =
+        val sourceHeight =
             currentMovie.height().toFloat()
 
         if (
-            movieWidth <= 0f ||
-            movieHeight <= 0f
+            sourceWidth <= 0f ||
+            sourceHeight <= 0f
         ) {
             return@Canvas
         }
 
+        // Mantém proporção e preenche todo o desktop.
+        // O GIF é cortado nas bordas, nunca esticado.
         val scale =
             maxOf(
-                size.width / movieWidth,
-                size.height / movieHeight,
+                size.width / sourceWidth,
+                size.height / sourceHeight,
             )
 
-        val scaledWidth =
-            movieWidth * scale
+        val drawWidth =
+            sourceWidth * scale
 
-        val scaledHeight =
-            movieHeight * scale
+        val drawHeight =
+            sourceHeight * scale
 
-        val left =
-            (size.width - scaledWidth) / 2f
+        val offsetX =
+            (size.width - drawWidth) / 2f
 
-        val top =
-            (size.height - scaledHeight) / 2f
+        val offsetY =
+            (size.height - drawHeight) / 2f
 
-        withTransform(
-            transformBlock = {
-                translate(
-                    left,
-                    top,
-                )
-                scale(
-                    scale,
-                    scale,
-                )
-            },
-        ) {
-            currentMovie.draw(
-                drawContext.canvas.nativeCanvas,
-                0f,
-                0f,
-            )
-        }
-
-        // Força a próxima atualização do frame.
-        invalidateAnimation()
+        currentMovie.draw(
+            drawContext.canvas.nativeCanvas,
+            offsetX,
+            offsetY,
+        )
     }
-}
-
-private suspend fun invalidateAnimation() {
-    delay(16L)
 }
