@@ -8,7 +8,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -25,8 +24,6 @@ import com.minios.elizierdias.apps.softwarecenter.SoftwareCenterApp
 import com.minios.elizierdias.apps.terminal.TerminalApp
 import com.minios.elizierdias.core.MiniApp
 import com.minios.elizierdias.core.MiniOSConfig
-import com.minios.elizierdias.core.MouseButton
-import com.minios.elizierdias.input.VirtualMouseOverlay
 import com.minios.elizierdias.personalization.Wallpapers
 import com.minios.elizierdias.shell.startmenu.StartMenu
 import com.minios.elizierdias.shell.taskbar.Taskbar
@@ -46,40 +43,19 @@ fun Desktop() {
 
     var startMenuOpen by remember { mutableStateOf(false) }
     var desktopSizePx by remember { mutableStateOf(Size(1280f, 720f)) }
-    var lastClickHint by remember { mutableStateOf("1 clique = ESQ · 2 = DIR") }
-    var mouseEnabled by remember { mutableStateOf(false) }
-
-    val iconLayout = remember {
-        AppRegistry.all.mapIndexed { i, app -> app to Offset(24f, 24f + i * 88f) }
-    }
-
-    fun handleMouseClick(pos: Offset, button: MouseButton) {
-        lastClickHint = if (button == MouseButton.LEFT) "clique ESQUERDO" else "clique DIREITO"
-        val hitWindow = windowManager.hitTest(pos)
-        if (hitWindow != null) {
-            windowManager.focus(hitWindow.instanceId)
-            return
-        }
-        val hitIcon = iconLayout.firstOrNull { (_, o) ->
-            pos.x >= o.x && pos.x <= o.x + 72f && pos.y >= o.y && pos.y <= o.y + 72f
-        }
-        if (hitIcon != null) {
-            windowManager.openApp(hitIcon.first, desktopSizePx)
-            return
-        }
-        if (startMenuOpen) startMenuOpen = false
-    }
 
     val wallpaperData: Any? = remember(wallpaperUri) {
-        if (wallpaperUri.isEmpty()) null
-        else if (wallpaperUri.startsWith("/")) File(wallpaperUri)
-        else wallpaperUri
+        when {
+            wallpaperUri.isEmpty() -> null
+            wallpaperUri.startsWith("/") -> File(wallpaperUri)
+            else -> wallpaperUri
+        }
     }
 
     Box(
-        Modifier.fillMaxSize().onSizeChanged {
-            desktopSizePx = Size(it.width.toFloat(), it.height.toFloat())
-        },
+        Modifier
+            .fillMaxSize()
+            .onSizeChanged { desktopSizePx = Size(it.width.toFloat(), it.height.toFloat()) },
     ) {
         if (wallpaperData != null) {
             Image(
@@ -129,9 +105,6 @@ fun Desktop() {
                     if (w.isFocused && !w.isMinimized) windowManager.minimize(id)
                     else windowManager.restore(id)
                 },
-                mouseEnabled = mouseEnabled,
-                onToggleMouse = { mouseEnabled = !mouseEnabled },
-                mouseHint = lastClickHint,
             )
         }
 
@@ -140,13 +113,6 @@ fun Desktop() {
                 apps = AppRegistry.all,
                 onAppClick = { windowManager.openApp(it, desktopSizePx) },
                 onDismiss = { startMenuOpen = false },
-            )
-        }
-
-        if (mouseEnabled) {
-            VirtualMouseOverlay(
-                enabled = true,
-                onClick = { pos, button -> handleMouseClick(pos, button) },
             )
         }
     }
