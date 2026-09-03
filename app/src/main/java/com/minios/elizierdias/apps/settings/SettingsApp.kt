@@ -131,6 +131,6 @@ fun SettingsApp() {
         Spacer(Modifier.height(24.dp))
         Text("Sobre", color = Color(0xFFC9D1D9), fontSize = 14.sp)
         Text("MiniOS 0.1.0 · com.minios.elizierdias.debug", color = Color(0xFF8B949E), fontSize = 12.sp)
-        Text("Mouse: 1 clique = ESQ · 2 cliques = DIR (estilo Winlator)", color = Color(0xFF8B949E), fontSize = 11.sp)
+        Text("Toque normal · Wallpaper landscape · Files com armazenamento", color = Color(0xFF8B949E), fontSize = 11.sp)
     }
 }
