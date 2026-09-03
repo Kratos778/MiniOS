@@ -9,89 +9,388 @@ import com.minios.elizierdias.core.MiniWindow
 import java.util.UUID
 
 class WindowManager {
-    private val _windows = mutableStateListOf<MiniWindow>()
-    val windows: List<MiniWindow> get() = _windows
-    private var nextZIndex = mutableStateOf(1)
+
+    private val _windows =
+        mutableStateListOf<MiniWindow>()
+
+    val windows: List<MiniWindow>
+        get() = _windows
+
+    private var nextZIndex =
+        mutableStateOf(1)
+
     private var cascadeOffset = 0
 
-    fun openApp(app: MiniApp, desktopSize: Size): String {
-        val existing = _windows.firstOrNull { it.app.id == app.id && it.isMinimized }
+    /*
+     * Guarda a posição e o tamanho da janela
+     * antes de ela ser maximizada.
+     *
+     * Não precisamos alterar MiniWindow para isso.
+     */
+    private data class NormalGeometry(
+        val position: Offset,
+        val size: Size,
+    )
+
+    private val normalGeometry =
+        mutableMapOf<String, NormalGeometry>()
+
+    fun openApp(
+        app: MiniApp,
+        desktopSize: Size,
+    ): String {
+
+        /*
+         * Se a aplicação já possui uma janela minimizada,
+         * restauramos a mesma instância em vez de criar
+         * uma nova.
+         */
+        val existing =
+            _windows.firstOrNull {
+                it.app.id == app.id &&
+                    it.isMinimized
+            }
+
         if (existing != null) {
             restore(existing.instanceId)
             return existing.instanceId
         }
-        val instanceId = UUID.randomUUID().toString()
-        val startPos = nextCascadePosition(desktopSize, app.defaultSize)
-        val window = MiniWindow(
-            instanceId = instanceId, app = app, position = startPos,
-            size = app.defaultSize, zIndex = nextZIndex.value, isFocused = true,
-        )
+
+        val instanceId =
+            UUID.randomUUID().toString()
+
+        val startPos =
+            nextCascadePosition(
+                desktopSize,
+                app.defaultSize,
+            )
+
+        /*
+         * Todas as outras janelas perdem o foco.
+         */
+        _windows.replaceInPlace {
+            it.copy(isFocused = false)
+        }
+
+        val window =
+            MiniWindow(
+                instanceId = instanceId,
+                app = app,
+                position = startPos,
+                size = app.defaultSize,
+                zIndex = nextZIndex.value,
+                isFocused = true,
+            )
+
         nextZIndex.value += 1
-        _windows.replaceAll { it.copy(isFocused = false) }
+
         _windows.add(window)
+
         return instanceId
     }
 
-    fun close(instanceId: String) { _windows.removeAll { it.instanceId == instanceId } }
+    fun close(
+        instanceId: String,
+    ) {
+        _windows.removeAll {
+            it.instanceId == instanceId
+        }
 
-    fun focus(instanceId: String) {
+        /*
+         * A janela deixou de existir.
+         * A geometria antiga também deixa de ser necessária.
+         */
+        normalGeometry.remove(instanceId)
+    }
+
+    fun focus(
+        instanceId: String,
+    ) {
+        val target =
+            _windows.firstOrNull {
+                it.instanceId == instanceId
+            }
+                ?: return
+
         nextZIndex.value += 1
-        val z = nextZIndex.value
-        _windows.replaceInPlace { w ->
-            if (w.instanceId == instanceId) w.copy(zIndex = z, isFocused = true, isMinimized = false)
-            else w.copy(isFocused = false)
+
+        val z =
+            nextZIndex.value
+
+        _windows.replaceInPlace { window ->
+            if (window.instanceId == target.instanceId) {
+                window.copy(
+                    zIndex = z,
+                    isFocused = true,
+                    isMinimized = false,
+                )
+            } else {
+                window.copy(
+                    isFocused = false,
+                )
+            }
         }
     }
 
-    fun move(instanceId: String, newPosition: Offset) {
-        _windows.replaceInPlace { w ->
-            if (w.instanceId == instanceId) w.copy(position = newPosition) else w
+    fun move(
+        instanceId: String,
+        newPosition: Offset,
+    ) {
+        _windows.replaceInPlace { window ->
+
+            if (window.instanceId != instanceId) {
+                return@replaceInPlace window
+            }
+
+            /*
+             * Se a janela estiver maximizada,
+             * não alteramos a posição normal salva.
+             *
+             * Isso garante que, ao sair do maximizado,
+             * ela volte exatamente para onde estava.
+             */
+            if (window.isMaximized) {
+                window
+            } else {
+                window.copy(
+                    position = newPosition,
+                )
+            }
         }
     }
 
-    fun resize(instanceId: String, newSize: Size) {
-        _windows.replaceInPlace { w ->
-            if (w.instanceId == instanceId) w.copy(
-                size = Size(newSize.width.coerceAtLeast(MIN_WIDTH), newSize.height.coerceAtLeast(MIN_HEIGHT))
-            ) else w
+    fun resize(
+        instanceId: String,
+        newSize: Size,
+    ) {
+        _windows.replaceInPlace { window ->
+
+            if (window.instanceId != instanceId) {
+                return@replaceInPlace window
+            }
+
+            /*
+             * Tamanho mínimo da janela.
+             */
+            val safeSize =
+                Size(
+                    width =
+                        newSize.width
+                            .coerceAtLeast(MIN_WIDTH),
+                    height =
+                        newSize.height
+                            .coerceAtLeast(MIN_HEIGHT),
+                )
+
+            /*
+             * Não permitimos que o resize durante
+             * o maximizado destrua o tamanho normal salvo.
+             */
+            if (window.isMaximized) {
+                window
+            } else {
+                window.copy(
+                    size = safeSize,
+                )
+            }
         }
     }
 
-    fun minimize(instanceId: String) {
-        _windows.replaceInPlace { w ->
-            if (w.instanceId == instanceId) w.copy(isMinimized = true, isFocused = false) else w
+    fun minimize(
+        instanceId: String,
+    ) {
+        _windows.replaceInPlace { window ->
+
+            if (window.instanceId == instanceId) {
+                window.copy(
+                    isMinimized = true,
+                    isFocused = false,
+                )
+            } else {
+                window
+            }
         }
     }
 
-    fun restore(instanceId: String) = focus(instanceId)
+    /*
+     * Restaura exatamente a mesma janela.
+     *
+     * A posição, tamanho, maximização e estado interno
+     * da app continuam preservados.
+     */
+    fun restore(
+        instanceId: String,
+    ) {
+        val exists =
+            _windows.any {
+                it.instanceId == instanceId
+            }
 
-    fun toggleMaximize(instanceId: String, desktopSize: Size) {
-        _windows.replaceInPlace { w ->
-            if (w.instanceId != instanceId) return@replaceInPlace w
-            if (w.isMaximized) w.copy(isMaximized = false, size = w.app.defaultSize, position = Offset(60f, 40f))
-            else w.copy(isMaximized = true, position = Offset.Zero, size = desktopSize)
+        if (!exists) {
+            return
         }
+
         focus(instanceId)
     }
 
-    fun hitTest(point: Offset): MiniWindow? =
-        _windows.filter { !it.isMinimized }.sortedByDescending { it.zIndex }.firstOrNull { w ->
-            point.x >= w.position.x && point.x <= w.position.x + w.size.width &&
-                point.y >= w.position.y && point.y <= w.position.y + w.size.height
+    fun toggleMaximize(
+        instanceId: String,
+        desktopSize: Size,
+    ) {
+        val target =
+            _windows.firstOrNull {
+                it.instanceId == instanceId
+            }
+                ?: return
+
+        if (target.isMaximized) {
+
+            /*
+             * DESMAXIMIZAR
+             *
+             * Se temos uma geometria salva, restauramos
+             * exatamente a posição e o tamanho anteriores.
+             */
+            val saved =
+                normalGeometry[instanceId]
+
+            _windows.replaceInPlace { window ->
+
+                if (window.instanceId != instanceId) {
+                    return@replaceInPlace window
+                }
+
+                if (saved != null) {
+                    window.copy(
+                        position = saved.position,
+                        size = saved.size,
+                        isMaximized = false,
+                    )
+                } else {
+                    /*
+                     * Fallback para janelas antigas que,
+                     * por alguma razão, não tenham geometria
+                     * registrada.
+                     */
+                    window.copy(
+                        isMaximized = false,
+                    )
+                }
+            }
+
+            /*
+             * Depois de restaurar, a geometria salva não
+             * precisa mais ficar armazenada.
+             */
+            normalGeometry.remove(instanceId)
+
+        } else {
+
+            /*
+             * MAXIMIZAR
+             *
+             * Primeiro guardamos a geometria atual.
+             */
+            normalGeometry[instanceId] =
+                NormalGeometry(
+                    position = target.position,
+                    size = target.size,
+                )
+
+            /*
+             * Depois ocupamos exatamente a área do Desktop.
+             */
+            _windows.replaceInPlace { window ->
+
+                if (window.instanceId != instanceId) {
+                    return@replaceInPlace window
+                }
+
+                window.copy(
+                    position = Offset.Zero,
+                    size = desktopSize,
+                    isMaximized = true,
+                )
+            }
         }
 
-    private fun nextCascadePosition(desktopSize: Size, windowSize: Size): Offset {
-        cascadeOffset = (cascadeOffset + 1) % 6
-        val step = 28f
-        var x = 80f + cascadeOffset * step
-        var y = 60f + cascadeOffset * step
-        if (x + windowSize.width > desktopSize.width) x = 80f
-        if (y + windowSize.height > desktopSize.height) y = 60f
-        return Offset(x, y)
+        /*
+         * A janela maximizada/desmaximizada continua sendo
+         * a janela ativa.
+         */
+        focus(instanceId)
     }
 
-    private inline fun <T> androidx.compose.runtime.snapshots.SnapshotStateList<T>.replaceInPlace(transform: (T) -> T) {
-        for (i in indices) this[i] = transform(this[i])
+    fun hitTest(
+        point: Offset,
+    ): MiniWindow? =
+        _windows
+            .filter {
+                !it.isMinimized
+            }
+            .sortedByDescending {
+                it.zIndex
+            }
+            .firstOrNull { window ->
+
+                point.x >= window.position.x &&
+                    point.x <=
+                    window.position.x +
+                        window.size.width &&
+
+                    point.y >= window.position.y &&
+                    point.y <=
+                    window.position.y +
+                        window.size.height
+            }
+
+    private fun nextCascadePosition(
+        desktopSize: Size,
+        windowSize: Size,
+    ): Offset {
+
+        cascadeOffset =
+            (cascadeOffset + 1) % 6
+
+        val step = 28f
+
+        var x =
+            80f +
+                cascadeOffset * step
+
+        var y =
+            60f +
+                cascadeOffset * step
+
+        if (
+            x + windowSize.width >
+            desktopSize.width
+        ) {
+            x = 80f
+        }
+
+        if (
+            y + windowSize.height >
+            desktopSize.height
+        ) {
+            y = 60f
+        }
+
+        return Offset(
+            x,
+            y,
+        )
+    }
+
+    private inline fun <T>
+        androidx.compose.runtime.snapshots.SnapshotStateList<T>
+        .replaceInPlace(
+            transform: (T) -> T,
+        ) {
+        for (i in indices) {
+            this[i] =
+                transform(this[i])
+        }
     }
 
     companion object {
