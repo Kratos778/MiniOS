@@ -31,6 +31,9 @@ fun AnimatedWallpaper(
         mutableLongStateOf(0L)
     }
 
+    /*
+     * Carrega o GIF apenas quando a fonte muda.
+     */
     LaunchedEffect(source) {
         movie = null
 
@@ -63,8 +66,15 @@ fun AnimatedWallpaper(
         }
     }
 
+    /*
+     * Relógio da animação.
+     *
+     * 16 ms ≈ 60 FPS.
+     */
     LaunchedEffect(movie) {
-        if (movie == null) return@LaunchedEffect
+        if (movie == null) {
+            return@LaunchedEffect
+        }
 
         while (true) {
             animationTime =
@@ -100,14 +110,25 @@ fun AnimatedWallpaper(
 
         if (
             sourceWidth <= 0f ||
-            sourceHeight <= 0f
+            sourceHeight <= 0f ||
+            size.width <= 0f ||
+            size.height <= 0f
         ) {
             return@Canvas
         }
 
-        // Mantém a proporção original.
-        // O GIF preenche toda a área e é cortado
-        // nas bordas quando necessário.
+        /*
+         * COVER / CROP
+         *
+         * O GIF comporta-se como um JPG/PNG
+         * usando ContentScale.Crop:
+         *
+         * - preenche 100% da área;
+         * - mantém a proporção;
+         * - não deixa barras vazias;
+         * - corta somente o excesso;
+         * - fica centralizado.
+         */
         val scale =
             maxOf(
                 size.width / sourceWidth,
@@ -126,10 +147,47 @@ fun AnimatedWallpaper(
         val offsetY =
             (size.height - drawHeight) / 2f
 
-        currentMovie.draw(
-            drawContext.canvas.nativeCanvas,
+        /*
+         * O Canvas é limitado à área real do Desktop.
+         * Assim, nenhuma parte do GIF pode escapar
+         * para a Taskbar.
+         */
+        val canvas =
+            drawContext.canvas.nativeCanvas
+
+        canvas.save()
+
+        canvas.clipRect(
+            0f,
+            0f,
+            size.width,
+            size.height,
+        )
+
+        /*
+         * Move para o centro e escala o GIF.
+         *
+         * Em vez de pedir ao Movie para desenhar
+         * diretamente num tamanho arbitrário,
+         * desenhamos o Movie no tamanho original
+         * e deixamos o Canvas fazer a transformação.
+         */
+        canvas.translate(
             offsetX,
             offsetY,
         )
+
+        canvas.scale(
+            scale,
+            scale,
+        )
+
+        currentMovie.draw(
+            canvas,
+            0f,
+            0f,
+        )
+
+        canvas.restore()
     }
 }
