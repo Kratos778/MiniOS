@@ -86,12 +86,25 @@ fun MediaPlayerApp() {
         MediaPlayer()
     }
 
+    fun stopAudio() {
+        try {
+            if (audioPlayer.isPlaying) {
+                audioPlayer.stop()
+            }
+        } catch (_: Exception) {
+        }
+
+        playerPrepared = false
+        isPlaying = false
+        progress = 0L
+    }
+
     fun loadMedia() {
         val result = mutableListOf<MediaItem>()
 
-        // -------------------------
+        // ---------------------------------------------------------
         // MUSIC
-        // -------------------------
+        // ---------------------------------------------------------
 
         val audioProjection = arrayOf(
             MediaStore.Audio.Media._ID,
@@ -110,16 +123,24 @@ fun MediaPlayerApp() {
             )?.use { cursor ->
 
                 val idColumn =
-                    cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.Audio.Media._ID
+                    )
 
                 val titleColumn =
-                    cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.Audio.Media.TITLE
+                    )
 
                 val artistColumn =
-                    cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.Audio.Media.ARTIST
+                    )
 
                 val durationColumn =
-                    cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.Audio.Media.DURATION
+                    )
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idColumn)
@@ -140,12 +161,12 @@ fun MediaPlayerApp() {
                 }
             }
         } catch (_: Exception) {
-            // Permission or MediaStore failure.
+            // MediaStore/permission failure.
         }
 
-        // -------------------------
+        // ---------------------------------------------------------
         // VIDEOS
-        // -------------------------
+        // ---------------------------------------------------------
 
         val videoProjection = arrayOf(
             MediaStore.Video.Media._ID,
@@ -163,13 +184,19 @@ fun MediaPlayerApp() {
             )?.use { cursor ->
 
                 val idColumn =
-                    cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.Video.Media._ID
+                    )
 
                 val titleColumn =
-                    cursor.getColumnIndexOrThrow(MediaStore.Video.Media.TITLE)
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.Video.Media.TITLE
+                    )
 
                 val durationColumn =
-                    cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
+                    cursor.getColumnIndexOrThrow(
+                        MediaStore.Video.Media.DURATION
+                    )
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idColumn)
@@ -189,21 +216,26 @@ fun MediaPlayerApp() {
                 }
             }
         } catch (_: Exception) {
-            // Permission or MediaStore failure.
+            // MediaStore/permission failure.
         }
 
         mediaItems = result
     }
 
     fun playAudio(item: MediaItem) {
-        if (item.isVideo) return
+        if (item.isVideo) {
+            return
+        }
 
         try {
             audioPlayer.reset()
+
             playerPrepared = false
             isPlaying = false
             progress = 0L
             duration = item.duration
+
+            selectedItem = item
 
             audioPlayer.setDataSource(
                 context,
@@ -212,7 +244,11 @@ fun MediaPlayerApp() {
 
             audioPlayer.setOnPreparedListener { player ->
                 playerPrepared = true
-                duration = player.duration.toLong()
+
+                duration = player.duration
+                    .coerceAtLeast(0)
+                    .toLong()
+
                 player.start()
                 isPlaying = true
             }
@@ -225,21 +261,23 @@ fun MediaPlayerApp() {
             audioPlayer.setOnErrorListener { _, _, _ ->
                 isPlaying = false
                 playerPrepared = false
+                progress = 0L
                 true
             }
-
-            selectedItem = item
 
             audioPlayer.prepareAsync()
 
         } catch (_: Exception) {
             isPlaying = false
             playerPrepared = false
+            progress = 0L
         }
     }
 
     fun togglePlayback() {
-        if (!playerPrepared) return
+        if (!playerPrepared) {
+            return
+        }
 
         try {
             if (audioPlayer.isPlaying) {
@@ -261,14 +299,20 @@ fun MediaPlayerApp() {
     LaunchedEffect(isPlaying, selectedItem) {
         while (isPlaying) {
             try {
-                if (playerPrepared && audioPlayer.isPlaying) {
-                    progress = audioPlayer.currentPosition.toLong()
+                if (
+                    playerPrepared &&
+                    audioPlayer.isPlaying
+                ) {
+                    progress =
+                        audioPlayer.currentPosition
+                            .coerceAtLeast(0)
+                            .toLong()
                 }
             } catch (_: Exception) {
                 break
             }
 
-            kotlinx.coroutines.delay(250)
+            kotlinx.coroutines.delay(250L)
         }
     }
 
@@ -285,6 +329,7 @@ fun MediaPlayerApp() {
 
     val visibleItems = when (filter) {
         MediaFilter.ALL -> mediaItems
+
         MediaFilter.MUSIC ->
             mediaItems.filter { !it.isVideo }
 
@@ -298,9 +343,9 @@ fun MediaPlayerApp() {
             .background(Color(0xFF0D1117))
     ) {
 
-        // --------------------------------
+        // =========================================================
         // HEADER
-        // --------------------------------
+        // =========================================================
 
         Row(
             modifier = Modifier
@@ -372,9 +417,9 @@ fun MediaPlayerApp() {
             }
         }
 
-        // --------------------------------
+        // =========================================================
         // CONTENT
-        // --------------------------------
+        // =========================================================
 
         Row(
             modifier = Modifier
@@ -382,9 +427,9 @@ fun MediaPlayerApp() {
                 .padding(12.dp)
         ) {
 
-            // --------------------------------
+            // =====================================================
             // LIBRARY
-            // --------------------------------
+            // =====================================================
 
             Column(
                 modifier = Modifier
@@ -400,7 +445,8 @@ fun MediaPlayerApp() {
                     ) {
 
                         Column(
-                            horizontalAlignment = Alignment.CenterHorizontally
+                            horizontalAlignment =
+                                Alignment.CenterHorizontally
                         ) {
 
                             Icon(
@@ -425,7 +471,8 @@ fun MediaPlayerApp() {
                             )
 
                             Text(
-                                text = "Nenhum ficheiro multimédia encontrado",
+                                text =
+                                    "Nenhum ficheiro multimédia encontrado",
                                 color = Color(0xFF8B949E),
                                 fontSize = 12.sp
                             )
@@ -452,10 +499,11 @@ fun MediaPlayerApp() {
                                 onClick = {
 
                                     if (item.isVideo) {
+                                        stopAudio()
+
                                         selectedItem = item
-                                        isPlaying = false
-                                        progress = 0L
                                         duration = item.duration
+                                        progress = 0L
                                     } else {
                                         playAudio(item)
                                     }
@@ -470,9 +518,9 @@ fun MediaPlayerApp() {
                 modifier = Modifier.width(12.dp)
             )
 
-            // --------------------------------
+            // =====================================================
             // PLAYER
-            // --------------------------------
+            // =====================================================
 
             PlayerPanel(
                 item = selectedItem,
@@ -520,6 +568,10 @@ fun MediaPlayerApp() {
     }
 }
 
+// =================================================================
+// FILTER BUTTON
+// =================================================================
+
 @Composable
 private fun FilterButton(
     text: String,
@@ -555,6 +607,10 @@ private fun FilterButton(
             )
     )
 }
+
+// =================================================================
+// MEDIA ROW
+// =================================================================
 
 @Composable
 private fun MediaRow(
@@ -637,6 +693,10 @@ private fun MediaRow(
     }
 }
 
+// =================================================================
+// PLAYER PANEL
+// =================================================================
+
 @Composable
 private fun PlayerPanel(
     item: MediaItem?,
@@ -654,14 +714,50 @@ private fun PlayerPanel(
             .clip(
                 RoundedCornerShape(8.dp)
             )
-            .background(
-                Color(0xFF161B22)
-            )
+            .background(Color(0xFF161B22))
             .padding(14.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment =
+            Alignment.CenterHorizontally
     ) {
 
-        if (item?.isVideo == true) {
+        if (item == null) {
+
+            Spacer(
+                modifier = Modifier.height(28.dp)
+            )
+
+            Icon(
+                imageVector = Icons.Filled.Headphones,
+                contentDescription = null,
+                tint = Color(0xFF58A6FF),
+                modifier = Modifier.size(56.dp)
+            )
+
+            Spacer(
+                modifier = Modifier.height(12.dp)
+            )
+
+            Text(
+                text = "Nenhuma mídia selecionada",
+                color = Color(0xFFE6EDF3),
+                fontSize = 13.sp
+            )
+
+            Spacer(
+                modifier = Modifier.height(4.dp)
+            )
+
+            Text(
+                text = "Escolha uma música ou vídeo",
+                color = Color(0xFF8B949E),
+                fontSize = 10.sp
+            )
+
+        } else if (item.isVideo) {
+
+            // =====================================================
+            // VIDEO
+            // =====================================================
 
             AndroidView(
                 factory = { context ->
@@ -670,11 +766,14 @@ private fun PlayerPanel(
                 update = { videoView ->
 
                     if (
-                        videoView.tag != item.uri.toString()
+                        videoView.tag !=
+                        item.uri.toString()
                     ) {
 
                         videoView.tag =
                             item.uri.toString()
+
+                        videoView.stopPlayback()
 
                         videoView.setVideoURI(
                             item.uri
@@ -715,11 +814,221 @@ private fun PlayerPanel(
                 fontSize = 10.sp
             )
 
+            Spacer(
+                modifier = Modifier.weight(1f)
+            )
+
         } else {
+
+            // =====================================================
+            // AUDIO
+            // =====================================================
 
             Spacer(
                 modifier = Modifier.height(20.dp)
             )
 
             Icon(
-               
+                imageVector = Icons.Filled.MusicNote,
+                contentDescription = null,
+                tint = Color(0xFF58A6FF),
+                modifier = Modifier.size(64.dp)
+            )
+
+            Spacer(
+                modifier = Modifier.height(14.dp)
+            )
+
+            Text(
+                text = item.title,
+                color = Color(0xFFE6EDF3),
+                fontSize = 15.sp,
+                maxLines = 1
+            )
+
+            Spacer(
+                modifier = Modifier.height(4.dp)
+            )
+
+            Text(
+                text = item.artist,
+                color = Color(0xFF8B949E),
+                fontSize = 11.sp,
+                maxLines = 1
+            )
+
+            Spacer(
+                modifier = Modifier.height(20.dp)
+            )
+
+            // =====================================================
+            // PROGRESS
+            // =====================================================
+
+            val safeDuration =
+                duration.coerceAtLeast(1L)
+
+            val safeProgress =
+                progress.coerceIn(
+                    0L,
+                    safeDuration
+                )
+
+            val progressValue =
+                safeProgress.toFloat() /
+                    safeDuration.toFloat()
+
+            LinearProgressIndicator(
+                progress = progressValue,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(
+                        RoundedCornerShape(4.dp)
+                    )
+            )
+
+            Spacer(
+                modifier = Modifier.height(6.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement =
+                    Arrangement.SpaceBetween
+            ) {
+
+                Text(
+                    text = formatDuration(progress),
+                    color = Color(0xFF8B949E),
+                    fontSize = 9.sp
+                )
+
+                Text(
+                    text = formatDuration(duration),
+                    color = Color(0xFF8B949E),
+                    fontSize = 9.sp
+                )
+            }
+
+            Spacer(
+                modifier = Modifier.height(14.dp)
+            )
+
+            // =====================================================
+            // CONTROLS
+            // =====================================================
+
+            Row(
+                horizontalArrangement =
+                    Arrangement.Center,
+                verticalAlignment =
+                    Alignment.CenterVertically
+            ) {
+
+                IconButton(
+                    onClick = onPrevious,
+                    modifier = Modifier.size(42.dp)
+                ) {
+                    Icon(
+                        imageVector =
+                            Icons.Filled.SkipPrevious,
+                        contentDescription =
+                            "Anterior",
+                        tint =
+                            Color(0xFFE6EDF3),
+                        modifier =
+                            Modifier.size(24.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onPlayPause,
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    Icon(
+                        imageVector =
+                            if (isPlaying) {
+                                Icons.Filled.Pause
+                            } else {
+                                Icons.Filled.PlayArrow
+                            },
+                        contentDescription =
+                            if (isPlaying) {
+                                "Pausar"
+                            } else {
+                                "Reproduzir"
+                            },
+                        tint =
+                            Color(0xFFE6EDF3),
+                        modifier =
+                            Modifier.size(32.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onNext,
+                    modifier = Modifier.size(42.dp)
+                ) {
+                    Icon(
+                        imageVector =
+                            Icons.Filled.SkipNext,
+                        contentDescription =
+                            "Próxima",
+                        tint =
+                            Color(0xFFE6EDF3),
+                        modifier =
+                            Modifier.size(24.dp)
+                    )
+                }
+            }
+
+            Spacer(
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+// =================================================================
+// DURATION FORMAT
+// =================================================================
+
+private fun formatDuration(
+    milliseconds: Long
+): String {
+    val safeMilliseconds =
+        milliseconds.coerceAtLeast(0L)
+
+    val totalSeconds =
+        TimeUnit.MILLISECONDS.toSeconds(
+            safeMilliseconds
+        )
+
+    val hours =
+        totalSeconds / 3600L
+
+    val minutes =
+        (totalSeconds % 3600L) / 60L
+
+    val seconds =
+        totalSeconds % 60L
+
+    return if (hours > 0L) {
+        String.format(
+            Locale.getDefault(),
+            "%d:%02d:%02d",
+            hours,
+            minutes,
+            seconds
+        )
+    } else {
+        String.format(
+            Locale.getDefault(),
+            "%02d:%02d",
+            minutes,
+            seconds
+        )
+    }
+}
+    
