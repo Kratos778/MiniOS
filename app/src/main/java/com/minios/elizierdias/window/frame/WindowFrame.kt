@@ -16,6 +16,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -37,57 +38,195 @@ fun WindowFrame(
     onToggleMaximize: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    if (window.isMinimized) return
+    val density = androidx.compose.ui.platform.LocalDensity.current
+
+    val windowWidth =
+        with(density) {
+            window.size.width.toDp()
+        }
+
+    val windowHeight =
+        with(density) {
+            window.size.height.toDp()
+        }
+
+    /*
+     * A janela continua na composição mesmo quando minimizada.
+     *
+     * Isso é importante para preservar o estado interno das aplicações,
+     * como:
+     * - Browser: abas, WebView e endereço
+     * - Files: diretório atual
+     * - Terminal: estado da sessão
+     *
+     * Não usamos "return" quando isMinimized == true.
+     */
+    val frameModifier =
+        if (window.isMinimized) {
+            Modifier
+                .offset {
+                    androidx.compose.ui.unit.IntOffset(
+                        window.position.x.toInt(),
+                        window.position.y.toInt(),
+                    )
+                }
+                .size(
+                    width = windowWidth,
+                    height = windowHeight,
+                )
+                .alpha(0f)
+        } else {
+            Modifier
+                .offset {
+                    androidx.compose.ui.unit.IntOffset(
+                        window.position.x.toInt(),
+                        window.position.y.toInt(),
+                    )
+                }
+                .size(
+                    width = windowWidth,
+                    height = windowHeight,
+                )
+        }
+
     Box(
-        modifier = Modifier
-            .offset { androidx.compose.ui.unit.IntOffset(window.position.x.toInt(), window.position.y.toInt()) }
-            .size(
-                width = with(androidx.compose.ui.platform.LocalDensity.current) { window.size.width.toDp() },
-                height = with(androidx.compose.ui.platform.LocalDensity.current) { window.size.height.toDp() },
-            )
+        modifier = frameModifier
             .border(
                 width = if (window.isFocused) 2.dp else 1.dp,
-                color = if (window.isFocused) MaterialTheme.colorScheme.primary else Color(0xFF30363D),
+                color =
+                    if (window.isFocused) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        Color(0xFF30363D)
+                    },
                 shape = RoundedCornerShape(10.dp),
             )
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF161B22)),
     ) {
-        Column(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+        ) {
             Row(
-                modifier = Modifier.fillMaxWidth().height(36.dp)
-                    .background(if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128))
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(36.dp)
+                    .background(
+                        if (window.isFocused) {
+                            Color(0xFF21262D)
+                        } else {
+                            Color(0xFF1C2128)
+                        }
+                    )
                     .pointerInput(window.instanceId) {
-                        detectDragGestures(onDragStart = { onFocus() }) { change, dragAmount ->
+                        detectDragGestures(
+                            onDragStart = {
+                                onFocus()
+                            }
+                        ) { change, dragAmount ->
                             change.consume()
-                            onMove(window.position + dragAmount)
+
+                            onMove(
+                                window.position + dragAmount
+                            )
                         }
                     }
                     .padding(horizontal = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(window.app.icon, null, tint = Color(0xFFC9D1D9), modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(window.app.title, color = Color(0xFFC9D1D9), fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                IconButton(onClick = onMinimize, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Filled.Minimize, null, tint = Color(0xFF8B949E), modifier = Modifier.size(14.dp))
+                Icon(
+                    imageVector = window.app.icon,
+                    contentDescription = null,
+                    tint = Color(0xFFC9D1D9),
+                    modifier = Modifier.size(16.dp),
+                )
+
+                Spacer(
+                    modifier = Modifier.width(8.dp)
+                )
+
+                Text(
+                    text = window.app.title,
+                    color = Color(0xFFC9D1D9),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
+
+                IconButton(
+                    onClick = onMinimize,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Minimize,
+                        contentDescription = "Minimize",
+                        tint = Color(0xFF8B949E),
+                        modifier = Modifier.size(14.dp),
+                    )
                 }
-                IconButton(onClick = onToggleMaximize, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Filled.CropSquare, null, tint = Color(0xFF8B949E), modifier = Modifier.size(14.dp))
+
+                IconButton(
+                    onClick = onToggleMaximize,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.CropSquare,
+                        contentDescription = "Maximize",
+                        tint = Color(0xFF8B949E),
+                        modifier = Modifier.size(14.dp),
+                    )
                 }
-                IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Filled.Close, null, tint = Color(0xFFF85149), modifier = Modifier.size(14.dp))
+
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Close",
+                        tint = Color(0xFFF85149),
+                        modifier = Modifier.size(14.dp),
+                    )
                 }
             }
-            Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                content()
+            }
         }
-        Box(
-            Modifier.align(Alignment.BottomEnd).size(18.dp).pointerInput(window.instanceId) {
-                detectDragGestures { change, dragAmount ->
-                    change.consume()
-                    onResize(Size(window.size.width + dragAmount.x, window.size.height + dragAmount.y))
-                }
-            },
-        )
+
+        /*
+         * Handle de redimensionamento.
+         *
+         * O WindowManager continua responsável pelos limites,
+         * tamanho mínimo e atualização do estado da janela.
+         */
+        if (!window.isMinimized) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(18.dp)
+                    .pointerInput(window.instanceId) {
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+
+                            onResize(
+                                Size(
+                                    width =
+                                        window.size.width +
+                                            dragAmount.x,
+                                    height =
+                                        window.size.height +
+                                            dragAmount.y,
+                                )
+                            )
+                        }
+                    },
+            )
+        }
     }
 }
