@@ -1,5 +1,6 @@
 package com.minios.elizierdias.shell.desktop
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -55,9 +57,21 @@ fun Desktop() {
         MiniOSConfig(context)
     }
 
+    /*
+     * O WindowManager pertence à instância atual do Desktop.
+     *
+     * Isso permite que as janelas existentes continuem
+     * sendo reutilizadas enquanto o Desktop recompõe.
+     */
     val windowManager = remember {
         WindowManager()
     }
+
+    /*
+     * =========================================================
+     * CONFIGURAÇÃO DO WALLPAPER
+     * =========================================================
+     */
 
     val wallpaperId by config.wallpaperId.collectAsState(
         initial = "default_gradient"
@@ -69,25 +83,30 @@ fun Desktop() {
 
     val wallpaper = Wallpapers.byId(wallpaperId)
 
+    /*
+     * =========================================================
+     * ESTADOS DO DESKTOP
+     * =========================================================
+     */
+
     var startMenuOpen by remember {
         mutableStateOf(false)
     }
 
     /*
-     * Mouse state.
+     * Fonte única da verdade para o mouse.
      *
-     * A Taskbar controla este estado futuramente.
-     * Por enquanto começa desligado para não bloquear
-     * a interação normal do MiniOS.
+     * O Taskbar apenas altera este estado.
+     * O VirtualMouse apenas lê este estado.
      */
     var mouseEnabled by remember {
         mutableStateOf(false)
     }
 
     /*
-     * Tamanho REAL da área do desktop.
+     * Tamanho REAL da área do Desktop.
      *
-     * A Taskbar fica fora desta área.
+     * A Taskbar não faz parte desta área.
      */
     var desktopSizePx by remember {
         mutableStateOf(
@@ -109,13 +128,13 @@ fun Desktop() {
      * MINI OS
      * =========================================================
      *
-     * A Column divide a tela em duas partes:
+     * A Column separa:
      *
-     * 1. Desktop  -> ocupa todo o espaço restante
-     * 2. Taskbar  -> 44dp fixos
+     * Desktop
+     *   ↓
+     * Taskbar
      *
-     * Isso garante que o wallpaper nunca fique atrás
-     * da Taskbar.
+     * O wallpaper fica exclusivamente dentro do Desktop.
      */
     Column(
         modifier = Modifier.fillMaxSize()
@@ -148,7 +167,10 @@ fun Desktop() {
             when {
 
                 /*
-                 * GIF animado
+                 * GIF ANIMADO
+                 *
+                 * AnimatedWallpaper é responsável pelo
+                 * desenho/crop do GIF.
                  */
                 isGifWallpaper -> {
 
@@ -159,11 +181,11 @@ fun Desktop() {
                 }
 
                 /*
-                 * Imagem personalizada
+                 * IMAGEM PERSONALIZADA
                  */
                 wallpaperUri.isNotBlank() -> {
 
-                    androidx.compose.foundation.Image(
+                    Image(
                         painter = rememberAsyncImagePainter(
                             model = wallpaperUri
                         ),
@@ -174,7 +196,7 @@ fun Desktop() {
                 }
 
                 /*
-                 * Wallpaper padrão
+                 * WALLPAPER PADRÃO
                  */
                 else -> {
 
@@ -225,18 +247,27 @@ fun Desktop() {
              * =================================================
              * JANELAS
              * =================================================
+             *
+             * IMPORTANTE:
+             *
+             * Não removemos uma janela minimizada da
+             * composição.
+             *
+             * Isso permite que aplicações como Browser e Files
+             * mantenham o estado criado através de remember.
+             *
+             * key(instanceId) garante identidade estável mesmo
+             * quando a ordem das janelas muda pelo zIndex.
              */
-
             windowManager.windows
                 .sortedBy {
                     it.zIndex
                 }
                 .forEach { window ->
 
-                    if (!window.isMinimized) {
+                    key(window.instanceId) {
 
                         WindowFrame(
-
                             window = window,
 
                             onFocus = {
@@ -285,22 +316,40 @@ fun Desktop() {
                             }
                         ) {
 
+                            /*
+                             * =================================================
+                             * CONTEÚDO DA APLICAÇÃO
+                             * =================================================
+                             *
+                             * O conteúdo continua associado ao
+                             * mesmo instanceId.
+                             */
                             when (window.app.id) {
 
-                                "files" ->
+                                "files" -> {
+
                                     FilesApp()
+                                }
 
-                                "terminal" ->
+                                "terminal" -> {
+
                                     TerminalApp()
+                                }
 
-                                "settings" ->
+                                "settings" -> {
+
                                     SettingsApp()
+                                }
 
-                                "software_center" ->
+                                "software_center" -> {
+
                                     SoftwareCenterApp()
+                                }
 
-                                "browser" ->
+                                "browser" -> {
+
                                     BrowserApp()
+                                }
 
                                 else -> {
 
@@ -351,24 +400,25 @@ fun Desktop() {
              * VIRTUAL MOUSE
              * =================================================
              *
-             * Fica SOMENTE dentro do Desktop.
+             * O cursor existe apenas dentro da área do Desktop.
              *
-             * Portanto nunca aparece sobre a Taskbar.
+             * Ele não invade a Taskbar porque a Taskbar está
+             * fora deste Box.
              */
             VirtualMouse(
                 enabled = mouseEnabled,
                 modifier = Modifier.fillMaxSize()
             )
         }
-
-        /*
+                /*
          * =====================================================
          * TASKBAR
          * =====================================================
          *
-         * Área independente.
+         * A Taskbar é uma área independente do Desktop.
          *
-         * O wallpaper termina exatamente acima daqui.
+         * O wallpaper e o VirtualMouse ficam somente na área
+         * superior. A Taskbar não recebe o desenho do cursor.
          */
         Box(
             modifier = Modifier
@@ -378,15 +428,44 @@ fun Desktop() {
 
             Taskbar(
 
+                /*
+                 * Lista atual das janelas abertas.
+                 *
+                 * A Taskbar não cria nem destrói janelas.
+                 * Apenas controla as instâncias existentes.
+                 */
                 openWindows =
                     windowManager.windows,
 
+                /*
+                 * Estado centralizado do mouse.
+                 *
+                 * O estado pertence ao Desktop.
+                 */
+                mouseEnabled =
+                    mouseEnabled,
+
+                /*
+                 * O Taskbar informa ao Desktop quando
+                 * o botão do mouse foi pressionado.
+                 */
+                onMouseToggle = { enabled ->
+
+                    mouseEnabled = enabled
+                },
+
+                /*
+                 * Abrir/fechar Start Menu.
+                 */
                 onStartClick = {
 
                     startMenuOpen =
                         !startMenuOpen
                 },
 
+                /*
+                 * Controle das janelas através da Taskbar.
+                 */
                 onWindowClick = { id ->
 
                     val window =
@@ -396,6 +475,11 @@ fun Desktop() {
                             }
                             ?: return@Taskbar
 
+                    /*
+                     * Se a janela está ativa e visível,
+                     * clicar novamente no botão da Taskbar
+                     * minimiza-a.
+                     */
                     if (
                         window.isFocused &&
                         !window.isMinimized
@@ -405,6 +489,12 @@ fun Desktop() {
 
                     } else {
 
+                        /*
+                         * Se está minimizada ou não focada,
+                         * restauramos a MESMA instância.
+                         *
+                         * Não abrimos uma aplicação nova.
+                         */
                         windowManager.restore(id)
                     }
                 }
@@ -413,6 +503,15 @@ fun Desktop() {
     }
 }
 
+
+/*
+ * =============================================================
+ * ÍCONE DO DESKTOP
+ * =============================================================
+ *
+ * Cada aplicação registrada no AppRegistry recebe um ícone
+ * clicável no Desktop.
+ */
 @Composable
 private fun DesktopIcon(
     app: MiniApp,
@@ -423,6 +522,7 @@ private fun DesktopIcon(
         modifier = Modifier
             .width(72.dp)
             .clickable {
+
                 onOpen()
             },
 
@@ -430,8 +530,12 @@ private fun DesktopIcon(
             Alignment.CenterHorizontally
     ) {
 
+        /*
+         * Ícone da aplicação.
+         */
         Icon(
-            imageVector = app.icon,
+            imageVector =
+                app.icon,
 
             contentDescription =
                 app.title,
@@ -443,11 +547,17 @@ private fun DesktopIcon(
                 Modifier.size(30.dp)
         )
 
+        /*
+         * Espaçamento entre o ícone e o nome.
+         */
         Spacer(
             modifier =
                 Modifier.height(4.dp)
         )
 
+        /*
+         * Nome da aplicação.
+         */
         Text(
             text =
                 app.title,
