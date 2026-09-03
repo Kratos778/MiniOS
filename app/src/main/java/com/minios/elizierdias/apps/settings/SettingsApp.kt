@@ -86,22 +86,27 @@ fun SettingsApp() {
     ) {
 
         Text(
-            "Wallpaper",
+            text = "Wallpaper",
             color = Color(0xFFC9D1D9),
             fontSize = 14.sp
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(
+            modifier = Modifier.height(8.dp)
+        )
 
-        Row {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
 
             Wallpapers.all.forEach { wp ->
 
                 Box(
                     modifier = Modifier
-                        .padding(end = 8.dp)
                         .size(56.dp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(
+                            RoundedCornerShape(8.dp)
+                        )
                         .background(wp.previewColor)
                         .clickable {
 
@@ -120,7 +125,7 @@ fun SettingsApp() {
                         wallpaperUri.isEmpty()
                     ) {
                         Text(
-                            "OK",
+                            text = "OK",
                             color = Color.White,
                             fontSize = 14.sp
                         )
@@ -129,7 +134,9 @@ fun SettingsApp() {
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(
+            modifier = Modifier.height(12.dp)
+        )
 
         Button(
             onClick = {
@@ -137,15 +144,19 @@ fun SettingsApp() {
                 pickImage.launch("image/*")
             }
         ) {
-            Text("Escolher foto da galeria")
+            Text(
+                text = "Escolher foto da galeria"
+            )
         }
 
         if (wallpaperUri.isNotEmpty()) {
 
-            Spacer(Modifier.height(6.dp))
+            Spacer(
+                modifier = Modifier.height(6.dp)
+            )
 
             Text(
-                "Foto personalizada ativa",
+                text = "Foto personalizada ativa",
                 color = Color(0xFF3FB950),
                 fontSize = 12.sp
             )
@@ -153,24 +164,30 @@ fun SettingsApp() {
 
         if (statusMsg.isNotEmpty()) {
 
-            Spacer(Modifier.height(4.dp))
+            Spacer(
+                modifier = Modifier.height(4.dp)
+            )
 
             Text(
-                statusMsg,
+                text = statusMsg,
                 color = Color(0xFF8B949E),
                 fontSize = 11.sp
             )
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(
+            modifier = Modifier.height(24.dp)
+        )
 
         Text(
-            "Desempenho",
+            text = "Desempenho",
             color = Color(0xFFC9D1D9),
             fontSize = 14.sp
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(
+            modifier = Modifier.height(8.dp)
+        )
 
         PowerMode.entries.forEach { mode ->
 
@@ -196,7 +213,7 @@ fun SettingsApp() {
                 )
 
                 Text(
-                    when (mode) {
+                    text = when (mode) {
                         PowerMode.PERFORMANCE -> "Performance"
                         PowerMode.BALANCED -> "Balanced"
                         PowerMode.BATTERY_SAVER -> "Battery Saver"
@@ -207,22 +224,34 @@ fun SettingsApp() {
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(
+            modifier = Modifier.height(24.dp)
+        )
 
         Text(
-            "Sobre",
+            text = "Sobre",
             color = Color(0xFFC9D1D9),
             fontSize = 14.sp
         )
 
+        Spacer(
+            modifier = Modifier.height(4.dp)
+        )
+
         Text(
-            "MiniOS 0.2.0",
+            text = "MiniOS 0.2.0",
             color = Color(0xFF8B949E),
             fontSize = 12.sp
         )
 
         Text(
-            "Wallpaper persistente · Desktop landscape",
+            text = "Wallpaper persistente",
+            color = Color(0xFF8B949E),
+            fontSize = 11.sp
+        )
+
+        Text(
+            text = "Desktop landscape",
             color = Color(0xFF8B949E),
             fontSize = 11.sp
         )
@@ -243,11 +272,21 @@ private fun saveWallpaper(
         directory.mkdirs()
     }
 
-    val filename =
-        "wallpaper_${System.currentTimeMillis()}.jpg"
+    val mimeType =
+        context.contentResolver.getType(uri)
 
-    val destination =
-        File(directory, filename)
+    val extension = when (mimeType) {
+        "image/jpeg" -> ".jpg"
+        "image/png" -> ".png"
+        "image/webp" -> ".webp"
+        "image/gif" -> ".gif"
+        else -> ".img"
+    }
+
+    val destination = File(
+        directory,
+        "wallpaper_${System.currentTimeMillis()}$extension"
+    )
 
     context.contentResolver
         .openInputStream(uri)
