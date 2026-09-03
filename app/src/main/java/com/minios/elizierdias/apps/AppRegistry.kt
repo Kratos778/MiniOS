@@ -2,6 +2,7 @@ package com.minios.elizierdias.apps
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
@@ -51,6 +52,14 @@ object AppRegistry {
             defaultSize = Size(900f, 620f),
         )
 
+    val mediaPlayer =
+        MiniApp(
+            "media_player",
+            "MediaPlayerOS",
+            Icons.Filled.Headphones,
+            defaultSize = Size(900f, 560f),
+        )
+
     val all =
         listOf(
             files,
@@ -58,6 +67,7 @@ object AppRegistry {
             settings,
             softwareCenter,
             browser,
+            mediaPlayer,
         )
 
     fun byId(id: String): MiniApp? =
