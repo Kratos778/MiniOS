@@ -1,5 +1,6 @@
 package com.minios.elizierdias.apps.settings
 
+import androidx.compose.foundation.layout.size
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
