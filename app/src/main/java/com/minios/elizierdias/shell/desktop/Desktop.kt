@@ -1,9 +1,8 @@
 package com.minios.elizierdias.shell.desktop
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -40,12 +39,16 @@ fun Desktop() {
     val context = LocalContext.current
     val config = remember { MiniOSConfig(context) }
     val windowManager = remember { WindowManager() }
+
     val wallpaperId by config.wallpaperId.collectAsState(initial = "default_gradient")
     val wallpaperUri by config.wallpaperUri.collectAsState(initial = "")
     val wallpaper = Wallpapers.byId(wallpaperId)
+
     var startMenuOpen by remember { mutableStateOf(false) }
     var desktopSizePx by remember { mutableStateOf(Size(1280f, 720f)) }
     var lastClickHint by remember { mutableStateOf("1 clique = ESQ · 2 = DIR") }
+    var mouseEnabled by remember { mutableStateOf(false) }
+
     val iconLayout = remember {
         AppRegistry.all.mapIndexed { i, app -> app to Offset(24f, 24f + i * 88f) }
     }
@@ -53,11 +56,17 @@ fun Desktop() {
     fun handleMouseClick(pos: Offset, button: MouseButton) {
         lastClickHint = if (button == MouseButton.LEFT) "clique ESQUERDO" else "clique DIREITO"
         val hitWindow = windowManager.hitTest(pos)
-        if (hitWindow != null) { windowManager.focus(hitWindow.instanceId); return }
+        if (hitWindow != null) {
+            windowManager.focus(hitWindow.instanceId)
+            return
+        }
         val hitIcon = iconLayout.firstOrNull { (_, o) ->
             pos.x >= o.x && pos.x <= o.x + 72f && pos.y >= o.y && pos.y <= o.y + 72f
         }
-        if (hitIcon != null) { windowManager.openApp(hitIcon.first, desktopSizePx); return }
+        if (hitIcon != null) {
+            windowManager.openApp(hitIcon.first, desktopSizePx)
+            return
+        }
         if (startMenuOpen) startMenuOpen = false
     }
 
@@ -67,9 +76,11 @@ fun Desktop() {
         else wallpaperUri
     }
 
-    Box(Modifier.fillMaxSize().onSizeChanged {
-        desktopSizePx = Size(it.width.toFloat(), it.height.toFloat())
-    }) {
+    Box(
+        Modifier.fillMaxSize().onSizeChanged {
+            desktopSizePx = Size(it.width.toFloat(), it.height.toFloat())
+        },
+    ) {
         if (wallpaperData != null) {
             Image(
                 painter = rememberAsyncImagePainter(
@@ -118,6 +129,8 @@ fun Desktop() {
                     if (w.isFocused && !w.isMinimized) windowManager.minimize(id)
                     else windowManager.restore(id)
                 },
+                mouseEnabled = mouseEnabled,
+                onToggleMouse = { mouseEnabled = !mouseEnabled },
                 mouseHint = lastClickHint,
             )
         }
@@ -130,18 +143,19 @@ fun Desktop() {
             )
         }
 
-        VirtualMouseOverlay(
-            enabled = true,
-            onClick = { pos, button -> handleMouseClick(pos, button) },
-        )
+        if (mouseEnabled) {
+            VirtualMouseOverlay(
+                enabled = true,
+                onClick = { pos, button -> handleMouseClick(pos, button) },
+            )
+        }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DesktopIcon(app: MiniApp, onOpen: () -> Unit) {
     Column(
-        Modifier.width(72.dp).combinedClickable(onDoubleClick = onOpen, onClick = {}),
+        Modifier.width(72.dp).clickable { onOpen() },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         androidx.compose.material3.Icon(app.icon, app.title, tint = Color.White, modifier = Modifier.size(30.dp))

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -25,14 +26,23 @@ fun Taskbar(
     openWindows: List<MiniWindow>,
     onStartClick: () -> Unit,
     onWindowClick: (String) -> Unit,
+    mouseEnabled: Boolean = false,
+    onToggleMouse: () -> Unit = {},
     mouseHint: String = "",
 ) {
-    Row(Modifier.fillMaxWidth().height(44.dp).background(Color(0xFF161B22)), verticalAlignment = Alignment.CenterVertically) {
-        Row(Modifier.fillMaxHeight().clickable { onStartClick() }.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().height(44.dp).background(Color(0xFF161B22)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier.fillMaxHeight().clickable { onStartClick() }.padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Icon(Icons.Filled.Apps, "Start", tint = Color(0xFF58A6FF), modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
             Text("MiniOS", color = Color(0xFFC9D1D9), fontSize = 13.sp)
         }
+
         Row(Modifier.weight(1f).padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             openWindows.forEach { w ->
                 Row(
@@ -48,12 +58,41 @@ fun Taskbar(
                 }
             }
         }
-        if (mouseHint.isNotEmpty()) {
-            Text(mouseHint, color = Color(0xFF8B949E), fontSize = 11.sp)
-            Spacer(Modifier.width(10.dp))
+
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(if (mouseEnabled) Color(0xFF238636) else Color(0xFF30363D))
+                .clickable { onToggleMouse() }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Mouse, "Mouse",
+                tint = if (mouseEnabled) Color.White else Color(0xFF8B949E),
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                if (mouseEnabled) "Mouse ON" else "Mouse OFF",
+                color = if (mouseEnabled) Color.White else Color(0xFF8B949E),
+                fontSize = 11.sp,
+            )
         }
+
+        Spacer(Modifier.width(8.dp))
+        if (mouseHint.isNotEmpty() && mouseEnabled) {
+            Text(mouseHint, color = Color(0xFF8B949E), fontSize = 10.sp)
+            Spacer(Modifier.width(8.dp))
+        }
+
         var now by remember { mutableStateOf(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())) }
-        LaunchedEffect(Unit) { while (true) { now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()); delay(15_000) } }
+        LaunchedEffect(Unit) {
+            while (true) {
+                now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                delay(15_000)
+            }
+        }
         Text(now, color = Color(0xFFC9D1D9), fontSize = 12.sp)
         Spacer(Modifier.width(14.dp))
     }
