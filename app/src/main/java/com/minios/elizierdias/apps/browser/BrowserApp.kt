@@ -40,8 +40,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -70,39 +70,22 @@ fun BrowserApp() {
                 id = 0,
                 url = "https://www.google.com",
                 title = "Nova aba",
-            )
+            ),
         )
     }
 
-    var selectedTabId by remember {
-        mutableIntStateOf(0)
-    }
+    var selectedTabId by remember { mutableIntStateOf(0) }
+    var addressText by remember { mutableStateOf("https://www.google.com") }
+    var webView by remember { mutableStateOf<WebView?>(null) }
 
-    var addressText by remember {
-        mutableStateOf("https://www.google.com")
-    }
-
-    var webView by remember {
-        mutableStateOf<WebView?>(null)
-    }
-
-    val selectedIndex = tabs
-        .indexOfFirst { it.id == selectedTabId }
-        .coerceAtLeast(0)
-
-    val selectedTab = tabs
-        .getOrNull(selectedIndex)
-        ?: tabs.first()
+    val selectedIndex = tabs.indexOfFirst { it.id == selectedTabId }.coerceAtLeast(0)
+    val selectedTab = tabs.getOrNull(selectedIndex) ?: tabs.first()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0D1117)),
     ) {
-
-        // ─────────────────────────────────────────────
-        // TAB BAR
-        // ─────────────────────────────────────────────
 
         Row(
             modifier = Modifier
@@ -111,494 +94,274 @@ fun BrowserApp() {
                 .background(Color(0xFF161B22)),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-
             LazyRow(
                 modifier = Modifier.weight(1f),
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-
-                items(
-                    items = tabs,
-                    key = { it.id },
-                ) { tab ->
-
+                items(items = tabs, key = { it.id }) { tab ->
                     Row(
                         modifier = Modifier
                             .height(32.dp)
                             .width(150.dp)
                             .background(
-                                if (tab.id == selectedTabId) {
-                                    Color(0xFF21262D)
-                                } else {
-                                    Color(0xFF161B22)
-                                },
-                                RoundedCornerShape(
-                                    topStart = 7.dp,
-                                    topEnd = 7.dp,
-                                ),
+                                if (tab.id == selectedTabId) Color(0xFF21262D) else Color(0xFF161B22),
+                                RoundedCornerShape(topStart = 7.dp, topEnd = 7.dp),
                             )
                             .clickable {
-
                                 selectedTabId = tab.id
                                 addressText = tab.url
                             }
                             .padding(start = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-
                         Text(
-                            text = tab.title
-                                .ifBlank { "Nova aba" },
+                            text = tab.title.ifBlank { "Nova aba" },
                             modifier = Modifier.weight(1f),
                             color = Color(0xFFD0D7DE),
                             fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-
                         IconButton(
                             onClick = {
-
                                 if (tabs.size == 1) {
-
-                                    tabs[0] = BrowserTab(
-                                        id = 0,
-                                        url = "https://www.google.com",
-                                        title = "Nova aba",
-                                    )
-
+                                    tabs[0] = BrowserTab(0, "https://www.google.com", "Nova aba")
                                     selectedTabId = 0
-                                    addressText =
-                                        "https://www.google.com"
-
+                                    addressText = "https://www.google.com"
                                 } else {
-
-                                    val index =
-                                        tabs.indexOfFirst {
-                                            it.id == tab.id
-                                        }
-
-                                    tabs.removeAll {
-                                        it.id == tab.id
-                                    }
-
+                                    val index = tabs.indexOfFirst { it.id == tab.id }
+                                    tabs.removeAll { it.id == tab.id }
                                     if (selectedTabId == tab.id) {
-
-                                        val newIndex =
-                                            (index - 1)
-                                                .coerceIn(
-                                                    0,
-                                                    tabs.lastIndex,
-                                                )
-
-                                        selectedTabId =
-                                            tabs[newIndex].id
-
-                                        addressText =
-                                            tabs[newIndex].url
+                                        val newIndex = (index - 1).coerceIn(0, tabs.lastIndex)
+                                        selectedTabId = tabs[newIndex].id
+                                        addressText = tabs[newIndex].url
                                     }
                                 }
                             },
-                            modifier = Modifier
-                                .width(30.dp)
-                                .height(30.dp),
+                            modifier = Modifier.width(30.dp).height(30.dp),
                         ) {
-
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = "Fechar",
-                                tint = Color(0xFF8B949E),
-                            )
+                            Icon(Icons.Filled.Close, "Fechar", tint = Color(0xFF8B949E))
                         }
                     }
                 }
             }
 
-            // Nova aba
             IconButton(
                 onClick = {
-
-                    val newId =
-                        (tabs.maxOfOrNull { it.id } ?: 0) + 1
-
-                    tabs.add(
-                        BrowserTab(
-                            id = newId,
-                            url = "https://www.google.com",
-                            title = "Nova aba",
-                        )
-                    )
-
+                    val newId = (tabs.maxOfOrNull { it.id } ?: 0) + 1
+                    tabs.add(BrowserTab(newId, "https://www.google.com", "Nova aba"))
                     selectedTabId = newId
-                    addressText =
-                        "https://www.google.com"
+                    addressText = "https://www.google.com"
                 },
-                modifier = Modifier
-                    .width(38.dp)
-                    .height(38.dp),
+                modifier = Modifier.width(38.dp).height(38.dp),
             ) {
-
-                Icon(
-                    imageVector = Icons.Filled.Add,
-                    contentDescription = "Nova aba",
-                    tint = Color(0xFFC9D1D9),
-                )
+                Icon(Icons.Filled.Add, "Nova aba", tint = Color(0xFFC9D1D9))
             }
         }
-
-        // ─────────────────────────────────────────────
-        // TOOLBAR
-        // ─────────────────────────────────────────────
 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(46.dp)
                 .background(Color(0xFF0D1117))
-                .padding(
-                    horizontal = 6.dp,
-                    vertical = 5.dp,
-                ),
+                .padding(horizontal = 6.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-
             IconButton(
-                onClick = {
-                    webView
-                        ?.takeIf { it.canGoBack() }
-                        ?.goBack()
-                },
-                modifier = Modifier
-                    .width(36.dp)
-                    .height(36.dp),
+                onClick = { webView?.takeIf { it.canGoBack() }?.goBack() },
+                modifier = Modifier.width(36.dp).height(36.dp),
             ) {
-
-                Icon(
-                    Icons.Filled.ArrowBack,
-                    contentDescription = "Voltar",
-                    tint = Color(0xFFC9D1D9),
-                )
+                Icon(Icons.Filled.ArrowBack, "Voltar", tint = Color(0xFFC9D1D9))
+            }
+            IconButton(
+                onClick = { webView?.takeIf { it.canGoForward() }?.goForward() },
+                modifier = Modifier.width(36.dp).height(36.dp),
+            ) {
+                Icon(Icons.Filled.ArrowForward, "Avançar", tint = Color(0xFFC9D1D9))
+            }
+            IconButton(
+                onClick = { webView?.reload() },
+                modifier = Modifier.width(36.dp).height(36.dp),
+            ) {
+                Icon(Icons.Filled.Refresh, "Recarregar", tint = Color(0xFFC9D1D9))
             }
 
-            IconButton(
-                onClick = {
-                    webView
-                        ?.takeIf { it.canGoForward() }
-                        ?.goForward()
-                },
-                modifier = Modifier
-                    .width(36.dp)
-                    .height(36.dp),
-            ) {
+            Spacer(modifier = Modifier.width(5.dp))
 
-                Icon(
-                    Icons.Filled.ArrowForward,
-                    contentDescription = "Avançar",
-                    tint = Color(0xFFC9D1D9),
-                )
-            }
-
-            IconButton(
-                onClick = {
-                    webView?.reload()
-                },
-                modifier = Modifier
-                    .width(36.dp)
-                    .height(36.dp),
-            ) {
-
-                Icon(
-                    Icons.Filled.Refresh,
-                    contentDescription = "Recarregar",
-                    tint = Color(0xFFC9D1D9),
-                )
-            }
-
-            Spacer(
-                modifier = Modifier.width(5.dp)
-            )
-
-            // Barra de endereço compacta
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .height(34.dp)
-                    .background(
-                        Color(0xFF161B22),
-                        RoundedCornerShape(17.dp),
-                    )
-                    .padding(
-                        horizontal = 14.dp,
-                    ),
+                    .background(Color(0xFF161B22), RoundedCornerShape(17.dp))
+                    .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
-
                 androidx.compose.foundation.text.BasicTextField(
                     value = addressText,
-                    onValueChange = {
-                        addressText = it
-                    },
+                    onValueChange = { addressText = it },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     textStyle = androidx.compose.ui.text.TextStyle(
                         color = Color(0xFFC9D1D9),
                         fontSize = 12.sp,
                     ),
-                    decorationBox = { innerTextField ->
-
+                    decorationBox = { inner ->
                         if (addressText.isEmpty()) {
-
                             Text(
-                                text = "Pesquisar ou introduzir endereço",
+                                "Pesquisar ou introduzir endereço",
                                 color = Color(0xFF6E7681),
                                 fontSize = 12.sp,
                             )
                         }
-
-                        innerTextField()
+                        inner()
                     },
                 )
             }
 
-            Spacer(
-                modifier = Modifier.width(4.dp)
-            )
+            Spacer(modifier = Modifier.width(4.dp))
 
             IconButton(
                 onClick = {
-
-                    val target =
-                        normalizeUrl(addressText)
-
+                    val target = normalizeUrl(addressText)
                     webView?.loadUrl(target)
-
                     if (selectedIndex in tabs.indices) {
-
-                        tabs[selectedIndex] =
-                            tabs[selectedIndex].copy(
-                                url = target,
-                            )
+                        tabs[selectedIndex] = tabs[selectedIndex].copy(url = target)
                     }
                 },
-                modifier = Modifier
-                    .width(38.dp)
-                    .height(36.dp),
+                modifier = Modifier.width(38.dp).height(36.dp),
             ) {
-
-                Icon(
-                    Icons.Filled.Search,
-                    contentDescription = "Abrir",
-                    tint = Color(0xFFC9D1D9),
-                )
+                Icon(Icons.Filled.Search, "Abrir", tint = Color(0xFFC9D1D9))
             }
         }
-
-        // ─────────────────────────────────────────────
-        // WEB CONTENT
-        // ─────────────────────────────────────────────
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.White),
         ) {
-
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
-
                 factory = { ctx ->
-
                     WebView(ctx).apply {
-
-                        layoutParams =
-                            ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                            )
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
 
                         settings.apply {
-
                             javaScriptEnabled = true
                             domStorageEnabled = true
                             databaseEnabled = true
+                            cacheMode = WebSettings.LOAD_DEFAULT
+                            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
 
-                            cacheMode =
-                                WebSettings.LOAD_DEFAULT
-
-                            builtInZoomControls = false
-                            displayZoomControls = false
-
+                            // Layout tipo desktop — evita UI mobile gigante
                             useWideViewPort = true
                             loadWithOverviewMode = true
+                            setSupportZoom(true)
+                            builtInZoomControls = true
+                            displayZoomControls = false
+
+                            // Texto / UI mais compactos (YouTube, TikTok, ChatGPT, etc.)
+                            textZoom = 75
+                            defaultFontSize = 14
+                            minimumFontSize = 8
+
+                            // User-Agent de computador
+                            userAgentString =
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                                    "Chrome/121.0.0.0 Safari/537.36"
 
                             allowFileAccess = false
                             allowContentAccess = true
-
-                            mediaPlaybackRequiresUserGesture =
-                                true
-
-                            setSupportZoom(true)
+                            mediaPlaybackRequiresUserGesture = false
+                            loadsImagesAutomatically = true
+                            blockNetworkImage = false
                         }
 
-                        CookieManager
-                            .getInstance()
-                            .setAcceptCookie(true)
+                        CookieManager.getInstance().setAcceptCookie(true)
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
 
-                        CookieManager
-                            .getInstance()
-                            .setAcceptThirdPartyCookies(
-                                this,
-                                true,
-                            )
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView,
+                                request: WebResourceRequest,
+                            ): Boolean = false
 
-                        webViewClient =
-                            object : WebViewClient() {
-
-                                override fun shouldOverrideUrlLoading(
-                                    view: WebView,
-                                    request: WebResourceRequest,
-                                ): Boolean {
-                                    return false
-                                }
-
-                                override fun onPageStarted(
-                                    view: WebView,
-                                    url: String?,
-                                    favicon: Bitmap?,
-                                ) {
-
-                                    super.onPageStarted(
-                                        view,
-                                        url,
-                                        favicon,
-                                    )
-
-                                    if (!url.isNullOrBlank()) {
-
-                                        addressText = url
-
-                                        if (
-                                            selectedIndex in tabs.indices
-                                        ) {
-
-                                            tabs[selectedIndex] =
-                                                tabs[selectedIndex]
-                                                    .copy(
-                                                        url = url,
-                                                    )
-                                        }
+                            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                                super.onPageStarted(view, url, favicon)
+                                if (!url.isNullOrBlank()) {
+                                    addressText = url
+                                    if (selectedIndex in tabs.indices) {
+                                        tabs[selectedIndex] = tabs[selectedIndex].copy(url = url)
                                     }
-                                }
-
-                                override fun onPageFinished(
-                                    view: WebView,
-                                    url: String?,
-                                ) {
-
-                                    super.onPageFinished(
-                                        view,
-                                        url,
-                                    )
-
-                                    if (
-                                        selectedIndex !in tabs.indices
-                                    ) {
-                                        return
-                                    }
-
-                                    val title =
-                                        view.title
-                                            ?.takeIf {
-                                                it.isNotBlank()
-                                            }
-                                            ?: "Página"
-
-                                    tabs[selectedIndex] =
-                                        tabs[selectedIndex]
-                                            .copy(
-                                                url = url
-                                                    ?: tabs[
-                                                        selectedIndex
-                                                    ].url,
-                                                title = title,
-                                            )
                                 }
                             }
 
-                        webChromeClient =
-                            WebChromeClient()
+                            override fun onPageFinished(view: WebView, url: String?) {
+                                super.onPageFinished(view, url)
 
+                                // Força viewport desktop para sites que forçam mobile
+                                view.evaluateJavascript(
+                                    """
+                                    (function() {
+                                      var w = 1280;
+                                      var meta = document.querySelector('meta[name=viewport]');
+                                      if (!meta) {
+                                        meta = document.createElement('meta');
+                                        meta.name = 'viewport';
+                                        document.head.appendChild(meta);
+                                      }
+                                      meta.setAttribute('content',
+                                        'width=' + w + ', initial-scale=1, maximum-scale=5, user-scalable=yes');
+                                    })();
+                                    """.trimIndent(),
+                                    null,
+                                )
+
+                                if (selectedIndex !in tabs.indices) return
+                                val title = view.title?.takeIf { it.isNotBlank() } ?: "Página"
+                                tabs[selectedIndex] = tabs[selectedIndex].copy(
+                                    url = url ?: tabs[selectedIndex].url,
+                                    title = title,
+                                )
+                            }
+                        }
+
+                        webChromeClient = WebChromeClient()
                         loadUrl(selectedTab.url)
-
                         webView = this
                     }
                 },
-
                 update = { view ->
-
-                    if (
-                        view.url != selectedTab.url &&
-                        selectedTab.url.isNotBlank()
-                    ) {
+                    if (view.url != selectedTab.url && selectedTab.url.isNotBlank()) {
                         view.loadUrl(selectedTab.url)
                     }
-
                     webView = view
                 },
             )
         }
     }
 
-    // ─────────────────────────────────────────────
-    // CLEANUP
-    // ─────────────────────────────────────────────
-
     DisposableEffect(Unit) {
-
         onDispose {
-
             webView?.apply {
-
                 stopLoading()
                 loadUrl("about:blank")
                 clearHistory()
                 removeAllViews()
                 destroy()
             }
-
             webView = null
         }
     }
 }
 
-private fun normalizeUrl(
-    input: String,
-): String {
-
+private fun normalizeUrl(input: String): String {
     val value = input.trim()
-
-    if (value.isEmpty()) {
-        return "https://www.google.com"
-    }
-
-    if (
-        value.startsWith("http://") ||
-        value.startsWith("https://")
-    ) {
-        return value
-    }
-
-    if (
-        value.contains(".") &&
-        !value.contains(" ")
-    ) {
-        return "https://$value"
-    }
-
-    return "https://www.google.com/search?q=${
-        URLEncoder.encode(
-            value,
-            "UTF-8",
-        )
-    }"
+    if (value.isEmpty()) return "https://www.google.com"
+    if (value.startsWith("http://") || value.startsWith("https://")) return value
+    if (value.contains(".") && !value.contains(" ")) return "https://$value"
+    return "https://www.google.com/search?q=${URLEncoder.encode(value, "UTF-8")}"
 }
