@@ -1,12 +1,14 @@
 package com.minios.elizierdias.shell.mouse
 
 import android.os.SystemClock
+import android.view.InputDevice
 import android.view.MotionEvent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -19,14 +21,15 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 
 /**
  * Rato virtual do MiniOS.
  *
- * - Arrastar: move o cursor (mecânica original)
- * - Toque simples: clique na **posição do cursor**
- * - Duplo toque: duplo clique na posição do cursor
- * - Mouse OFF: não intercepta — touch normal nos dedos
+ * - Arrastar: move o cursor (mecânica original, inalterada)
+ * - Duplo toque em qualquer sítio do ecrã: clique **na posição do cursor**
+ *   (não debaixo dos dedos)
+ * - Mouse OFF: não intercepta — touch normal
  */
 @Composable
 fun VirtualMouse(
@@ -41,57 +44,55 @@ fun VirtualMouse(
     var cursor by remember { mutableStateOf(Offset.Zero) }
     var initialized by remember { mutableStateOf(false) }
     var originInWindow by remember { mutableStateOf(Offset.Zero) }
-    var intercepting by remember { mutableStateOf(true) }
 
-    fun injectClick(at: Offset, count: Int = 1) {
+    // true = captura drag/tap; false = deixa passar o clique injetado para baixo
+    var captureTouches by remember { mutableStateOf(true) }
+    var pendingClick by remember { mutableStateOf(false) }
+
+    fun dispatchClickAtCursor() {
         val target = hostView.rootView ?: hostView
-        val x = originInWindow.x + at.x
-        val y = originInWindow.y + at.y
+        val x = originInWindow.x + cursor.x
+        val y = originInWindow.y + cursor.y
 
-        intercepting = false
-
-        fun fireOne(then: (() -> Unit)? = null) {
-            val downTime = SystemClock.uptimeMillis()
-            val down = MotionEvent.obtain(
-                downTime,
-                downTime,
-                MotionEvent.ACTION_DOWN,
-                x,
-                y,
-                0,
-            )
-            val up = MotionEvent.obtain(
-                downTime,
-                downTime + 40,
-                MotionEvent.ACTION_UP,
-                x,
-                y,
-                0,
-            )
-            try {
-                target.dispatchTouchEvent(down)
-                target.dispatchTouchEvent(up)
-            } finally {
-                down.recycle()
-                up.recycle()
-            }
-            then?.invoke()
+        val downTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(
+            downTime,
+            downTime,
+            MotionEvent.ACTION_DOWN,
+            x,
+            y,
+            0,
+        ).apply {
+            source = InputDevice.SOURCE_TOUCHSCREEN
+        }
+        val up = MotionEvent.obtain(
+            downTime,
+            downTime + 50,
+            MotionEvent.ACTION_UP,
+            x,
+            y,
+            0,
+        ).apply {
+            source = InputDevice.SOURCE_TOUCHSCREEN
         }
 
-        target.post {
-            if (count <= 1) {
-                fireOne {
-                    target.post { intercepting = true }
-                }
-            } else {
-                fireOne {
-                    target.postDelayed({
-                        fireOne {
-                            target.post { intercepting = true }
-                        }
-                    }, 90L)
-                }
-            }
+        try {
+            target.dispatchTouchEvent(down)
+            target.dispatchTouchEvent(up)
+        } finally {
+            down.recycle()
+            up.recycle()
+        }
+    }
+
+    // Depois de desligar a captura, espera 1 frame e injeta o clique no cursor
+    LaunchedEffect(pendingClick, captureTouches) {
+        if (pendingClick && !captureTouches) {
+            delay(32)
+            dispatchClickAtCursor()
+            delay(80)
+            pendingClick = false
+            captureTouches = true
         }
     }
 
@@ -109,8 +110,9 @@ fun VirtualMouse(
                 }
             }
             .then(
-                if (intercepting) {
+                if (captureTouches) {
                     Modifier
+                        // Movimento — igual ao que já tinhas
                         .pointerInput(sensitivity) {
                             detectDragGestures { change, dragAmount ->
                                 change.consume()
@@ -122,21 +124,20 @@ fun VirtualMouse(
                                 initialized = true
                             }
                         }
+                        // Só duplo toque → clique na posição do cursor
                         .pointerInput(Unit) {
                             detectTapGestures(
-                                onTap = {
-                                    if (!initialized) {
-                                        cursor = Offset(size.width / 2f, size.height / 2f)
-                                        initialized = true
-                                    }
-                                    injectClick(cursor, count = 1)
-                                },
                                 onDoubleTap = {
                                     if (!initialized) {
-                                        cursor = Offset(size.width / 2f, size.height / 2f)
+                                        cursor = Offset(
+                                            size.width / 2f,
+                                            size.height / 2f,
+                                        )
                                         initialized = true
                                     }
-                                    injectClick(cursor, count = 2)
+                                    // Liberta a captura para o evento injetado chegar às apps
+                                    pendingClick = true
+                                    captureTouches = false
                                 },
                             )
                         }
