@@ -60,6 +60,14 @@ object AppRegistry {
             defaultSize = Size(900f, 560f),
         )
 
+    val smartPlay =
+        MiniApp(
+            "smartplay",
+            "SmartPlay",
+            Icons.Filled.Language,
+            defaultSize = Size(900f, 620f),
+        )
+
     val all =
         listOf(
             files,
@@ -68,6 +76,7 @@ object AppRegistry {
             softwareCenter,
             browser,
             mediaPlayer,
+            smartPlay,
         )
 
     fun byId(id: String): MiniApp? =
