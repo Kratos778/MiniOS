@@ -37,6 +37,7 @@ import com.minios.elizierdias.apps.browser.BrowserApp
 import com.minios.elizierdias.apps.files.FilesApp
 import com.minios.elizierdias.apps.media.MediaPlayerOS
 import com.minios.elizierdias.apps.settings.SettingsApp
+import com.minios.elizierdias.apps.settings.isVideoPath
 import com.minios.elizierdias.apps.softwarecenter.SoftwareCenterApp
 import com.minios.elizierdias.apps.terminal.TerminalApp
 import com.minios.elizierdias.core.MiniApp
@@ -100,12 +101,7 @@ fun Desktop() {
             ignoreCase = true,
         )
 
-    val isVideoWallpaper =
-        wallpaperUri.endsWith(".mp4", ignoreCase = true) ||
-            wallpaperUri.endsWith(".webm", ignoreCase = true) ||
-            wallpaperUri.endsWith(".mkv", ignoreCase = true) ||
-            wallpaperUri.endsWith(".3gp", ignoreCase = true) ||
-            wallpaperUri.endsWith(".mov", ignoreCase = true)
+    val isVideoWallpaper = isVideoPath(wallpaperUri)
 
     Column(
         modifier = Modifier.fillMaxSize(),
