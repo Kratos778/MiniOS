@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import java.io.File
+import java.io.FileInputStream
 
 /**
  * Wallpaper de vídeo em loop com a **mesma mecânica** de GIF / JPG / PNG:
@@ -31,19 +32,8 @@ fun VideoWallpaper(
 ) {
     val context = LocalContext.current
 
-    val uri = remember(source) {
-        when {
-            source.startsWith("content://") -> Uri.parse(source)
-            source.startsWith("/") -> Uri.fromFile(File(source))
-            else -> null
-        }
-    }
-
-    if (uri == null) return
-
     val mediaPlayer = remember(source) { MediaPlayer() }
 
-    // Atualiza volume sem mexer no crop / surface
     DisposableEffect(soundEnabled) {
         try {
             if (soundEnabled) {
@@ -122,6 +112,25 @@ fun VideoWallpaper(
                     }
                 }
 
+                fun bindDataSource() {
+                    when {
+                        source.startsWith("content://") -> {
+                            mediaPlayer.setDataSource(ctx, Uri.parse(source))
+                        }
+                        source.startsWith("/") -> {
+                            val file = File(source)
+                            if (!file.exists() || file.length() == 0L) {
+                                throw IllegalStateException("Ficheiro de vídeo em falta")
+                            }
+                            // FD é mais fiável que file:// URI em Android moderno
+                            FileInputStream(file).use { fis ->
+                                mediaPlayer.setDataSource(fis.fd)
+                            }
+                        }
+                        else -> throw IllegalArgumentException("Fonte inválida")
+                    }
+                }
+
                 textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(
                         surface: SurfaceTexture,
@@ -130,7 +139,7 @@ fun VideoWallpaper(
                     ) {
                         try {
                             mediaPlayer.reset()
-                            mediaPlayer.setDataSource(ctx, uri)
+                            bindDataSource()
                             mediaPlayer.setSurface(Surface(surface))
                             mediaPlayer.isLooping = true
                             applyVolume()
@@ -140,9 +149,15 @@ fun VideoWallpaper(
                             mediaPlayer.setOnPreparedListener { mp ->
                                 post { applyCover(mp.videoWidth, mp.videoHeight) }
                                 applyVolume()
-                                mp.start()
+                                try {
+                                    mp.start()
+                                } catch (_: Exception) {
+                                }
                             }
-                            mediaPlayer.setOnErrorListener { _, _, _ -> true }
+                            mediaPlayer.setOnErrorListener { _, _, _ ->
+                                // true = erro tratado (evita crash); ecrã fica escuro se codec falhar
+                                true
+                            }
                             mediaPlayer.prepareAsync()
                         } catch (_: Exception) {
                         }
@@ -182,9 +197,6 @@ fun VideoWallpaper(
                 }
             }
         },
-        update = { view ->
-            // Volume pode mudar em runtime via DisposableEffect; nada no layout
-            view
-        },
+        update = { view -> view },
     )
 }
