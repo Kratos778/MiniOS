@@ -11,7 +11,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -23,14 +31,23 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import java.io.File
 
 private data class FileEntry(
@@ -43,6 +60,8 @@ private data class FileEntry(
 @Composable
 fun FilesApp() {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
     var currentDir by remember { mutableStateOf<File?>(null) }
     var entries by remember { mutableStateOf<List<FileEntry>>(emptyList()) }
     var errorMsg by remember { mutableStateOf("") }
@@ -53,31 +72,59 @@ fun FilesApp() {
             Environment.isExternalStorageManager()
         } else {
             ContextCompat.checkSelfPermission(
-                context, Manifest.permission.READ_EXTERNAL_STORAGE
+                context,
+                Manifest.permission.READ_EXTERNAL_STORAGE,
             ) == PackageManager.PERMISSION_GRANTED
         }
     }
 
     val requestLegacy = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
+        ActivityResultContracts.RequestPermission(),
     ) { granted ->
         hasPermission = granted
-        if (granted) currentDir = Environment.getExternalStorageDirectory()
-        else errorMsg = "Permissao negada"
+        if (granted) {
+            errorMsg = ""
+            currentDir = null
+            // load via LaunchedEffect(hasPermission)
+        } else {
+            errorMsg = "Permissão negada"
+        }
     }
 
     fun openAllFilesSettings() {
+        errorMsg = ""
         try {
             val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                 data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
         } catch (_: Exception) {
             try {
-                context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
             } catch (_: Exception) {
-                errorMsg = "Abre Definicoes → Apps → MiniOS → Permissoes"
+                try {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    context.startActivity(intent)
+                    errorMsg = "Ativa «Ficheiros e multimédia» ou «Acesso a todos os ficheiros»"
+                } catch (_: Exception) {
+                    errorMsg = "Abre Definições → Apps → MiniOS → Permissões → Armazenamento"
+                }
             }
+        }
+    }
+
+    fun requestAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            openAllFilesSettings()
+        } else {
+            requestLegacy.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
     }
 
@@ -85,23 +132,53 @@ fun FilesApp() {
         if (dir == null) {
             val roots = mutableListOf<FileEntry>()
             val ext = Environment.getExternalStorageDirectory()
-            if (ext.exists()) roots.add(FileEntry("Armazenamento interno", ext, true, true))
+            if (ext.exists()) {
+                roots.add(FileEntry("Armazenamento interno", ext, true, true))
+            }
             val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (downloads.exists()) roots.add(FileEntry("Downloads", downloads, true, true))
+            if (downloads.exists()) {
+                roots.add(FileEntry("Downloads", downloads, true, true))
+            }
             val pictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-            if (pictures.exists()) roots.add(FileEntry("Pictures / Galeria", pictures, true, true))
+            if (pictures.exists()) {
+                roots.add(FileEntry("Pictures / Galeria", pictures, true, true))
+            }
             val dcim = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
-            if (dcim.exists()) roots.add(FileEntry("DCIM", dcim, true, true))
+            if (dcim.exists()) {
+                roots.add(FileEntry("DCIM", dcim, true, true))
+            }
             val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            if (docs.exists()) roots.add(FileEntry("Documents", docs, true, true))
+            if (docs.exists()) {
+                roots.add(FileEntry("Documents", docs, true, true))
+            }
+            val music = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+            if (music.exists()) {
+                roots.add(FileEntry("Music", music, true, true))
+            }
+            val movies = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+            if (movies.exists()) {
+                roots.add(FileEntry("Movies", movies, true, true))
+            }
             entries = roots
-            errorMsg = if (roots.isEmpty()) "Sem acesso ao armazenamento" else ""
+            errorMsg = if (roots.isEmpty()) {
+                "Sem acesso ao armazenamento — concede a permissão e toca em Atualizar"
+            } else {
+                ""
+            }
             return
         }
+
         try {
-            val list = dir.listFiles()?.sortedWith(
-                compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() }
-            ) ?: emptyList()
+            val listed = dir.listFiles()
+            if (listed == null) {
+                entries = emptyList()
+                errorMsg = "Sem permissão para ler esta pasta. Concede «Acesso a todos os ficheiros»."
+                hasPermission = checkPermission()
+                return
+            }
+            val list = listed.sortedWith(
+                compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() },
+            )
             entries = list.map { f -> FileEntry(f.name, f, f.isDirectory) }
             errorMsg = ""
         } catch (e: Exception) {
@@ -110,97 +187,161 @@ fun FilesApp() {
         }
     }
 
-    LaunchedEffect(Unit) {
-        hasPermission = checkPermission()
-        if (hasPermission) loadDir(null)
-    }
-    LaunchedEffect(hasPermission) {
-        if (hasPermission) loadDir(currentDir)
+    fun refreshPermissionAndLoad() {
+        val granted = checkPermission()
+        hasPermission = granted
+        if (granted) {
+            loadDir(currentDir)
+        } else {
+            entries = emptyList()
+        }
     }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFF0D1117))) {
+    // Ao voltar das Definições, revalida a permissão
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshPermissionAndLoad()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        refreshPermissionAndLoad()
+    }
+
+    LaunchedEffect(hasPermission) {
+        if (hasPermission) {
+            loadDir(currentDir)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0D1117)),
+    ) {
         Row(
-            Modifier.fillMaxWidth().background(Color(0xFF161B22)).padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF161B22))
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (currentDir != null) {
-                IconButton(onClick = {
-                    val parent = currentDir?.parentFile
-                    if (parent == null || parent.path == currentDir?.path) {
-                        currentDir = null
-                        loadDir(null)
-                    } else {
-                        currentDir = parent
-                        loadDir(parent)
-                    }
-                }) {
+                IconButton(
+                    onClick = {
+                        val parent = currentDir?.parentFile
+                        if (parent == null || parent.path == currentDir?.path) {
+                            currentDir = null
+                            loadDir(null)
+                        } else {
+                            currentDir = parent
+                            loadDir(parent)
+                        }
+                    },
+                ) {
                     Icon(Icons.Filled.ArrowBack, "Voltar", tint = Color(0xFFC9D1D9))
                 }
             }
             Text(
-                currentDir?.absolutePath ?: "Armazenamento",
-                color = Color(0xFF8B949E), fontSize = 12.sp,
-                modifier = Modifier.weight(1f), maxLines = 1,
+                text = currentDir?.absolutePath ?: "Armazenamento",
+                color = Color(0xFF8B949E),
+                fontSize = 12.sp,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
             )
-            Button(onClick = {
-                hasPermission = checkPermission()
-                if (hasPermission) loadDir(currentDir) else {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) openAllFilesSettings()
-                    else requestLegacy.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
-                }
-            }) {
-                Text(if (hasPermission) "Atualizar" else "Permitir acesso", fontSize = 11.sp)
+            Button(
+                onClick = {
+                    if (checkPermission()) {
+                        refreshPermissionAndLoad()
+                    } else {
+                        requestAccess()
+                    }
+                },
+            ) {
+                Text(
+                    text = if (hasPermission) "Atualizar" else "Permitir acesso",
+                    fontSize = 11.sp,
+                )
             }
         }
 
         if (!hasPermission) {
-            Column(Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    "Para ver ficheiros e a galeria, precisa de acesso ao armazenamento.",
-                    color = Color(0xFFC9D1D9), fontSize = 13.sp,
+                    text = "Para ver ficheiros e a galeria, o MiniOS precisa de acesso ao armazenamento.",
+                    color = Color(0xFFC9D1D9),
+                    fontSize = 13.sp,
                 )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) openAllFilesSettings()
-                    else requestLegacy.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
-                }) {
-                    Text("Conceder permissao")
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(onClick = { requestAccess() }) {
+                    Text("Conceder permissão")
                 }
-                Spacer(Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "Android 11+: Definicoes → Acesso a todos os ficheiros",
-                    color = Color(0xFF8B949E), fontSize = 11.sp,
+                    text = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        "Android 11+: Definições → acesso a todos os ficheiros → ativa para MiniOS."
+                    } else {
+                        "Concede a permissão de armazenamento quando o sistema pedir."
+                    },
+                    color = Color(0xFF8B949E),
+                    fontSize = 11.sp,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Depois de ativar, volta aqui — a permissão é detetada automaticamente.",
+                    color = Color(0xFF8B949E),
+                    fontSize = 11.sp,
                 )
             }
         }
 
         if (errorMsg.isNotEmpty()) {
-            Text(errorMsg, color = Color(0xFFF85149), fontSize = 12.sp, modifier = Modifier.padding(12.dp))
+            Text(
+                text = errorMsg,
+                color = Color(0xFFF85149),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(12.dp),
+            )
         }
 
-        LazyColumn {
-            items(entries) { e ->
-                Row(
-                    Modifier.fillMaxWidth().clickable {
-                        if (e.isDir && e.file != null) {
-                            currentDir = e.file
-                            loadDir(e.file)
-                        }
-                    }.padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        when {
-                            e.isShortcut -> Icons.Filled.PhoneAndroid
-                            e.isDir -> Icons.Filled.Folder
-                            else -> Icons.Filled.InsertDriveFile
-                        },
-                        null,
-                        tint = if (e.isDir) Color(0xFF58A6FF) else Color(0xFF8B949E),
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(e.name, color = Color(0xFFC9D1D9), fontSize = 14.sp)
+        if (hasPermission) {
+            LazyColumn {
+                items(entries) { e ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                if (e.isDir && e.file != null) {
+                                    currentDir = e.file
+                                    loadDir(e.file)
+                                }
+                            }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                e.isShortcut -> Icons.Filled.PhoneAndroid
+                                e.isDir -> Icons.Filled.Folder
+                                else -> Icons.Filled.InsertDriveFile
+                            },
+                            contentDescription = null,
+                            tint = if (e.isDir) Color(0xFF58A6FF) else Color(0xFF8B949E),
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = e.name,
+                            color = Color(0xFFC9D1D9),
+                            fontSize = 14.sp,
+                        )
+                    }
                 }
             }
         }
