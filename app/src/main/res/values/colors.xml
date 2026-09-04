@@ -1,3 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Adaptive icon background — matches MiniOS dark brand -->
     <color name="ic_launcher_background">#0D1117</color>
 </resources>
