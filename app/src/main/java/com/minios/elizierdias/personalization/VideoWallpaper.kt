@@ -1,12 +1,13 @@
 package com.minios.elizierdias.personalization
 
-import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.net.Uri
+import android.view.Gravity
 import android.view.Surface
 import android.view.TextureView
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -17,8 +18,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import java.io.File
 
 /**
- * Wallpaper de vídeo em loop, com escala **cover** (como ContentScale.Crop):
- * preenche o ecrã todo, mantém proporção e corta o excesso.
+ * Wallpaper de vídeo em loop com a **mesma mecânica** de GIF / JPG / PNG:
+ * ContentScale.Crop — preenche o ecrã, centrado, corta o excesso, sem barras.
  */
 @Composable
 fun VideoWallpaper(
@@ -37,9 +38,7 @@ fun VideoWallpaper(
 
     if (uri == null) return
 
-    val mediaPlayer = remember(source) {
-        MediaPlayer()
-    }
+    val mediaPlayer = remember(source) { MediaPlayer() }
 
     DisposableEffect(source) {
         onDispose {
@@ -61,32 +60,43 @@ fun VideoWallpaper(
     AndroidView(
         modifier = modifier.fillMaxSize(),
         factory = { ctx ->
-            TextureView(ctx).apply {
+            FrameLayout(ctx).apply {
                 layoutParams = ViewGroup.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
+                clipChildren = true
+                clipToPadding = true
+                setBackgroundColor(0xFF0D1117.toInt())
 
-                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                val textureView = TextureView(ctx).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        Gravity.CENTER,
+                    )
+                }
+                addView(textureView)
 
-                    private fun applyCenterCrop(view: TextureView, videoW: Int, videoH: Int) {
-                        if (videoW <= 0 || videoH <= 0) return
-                        val viewW = view.width.toFloat()
-                        val viewH = view.height.toFloat()
-                        if (viewW <= 0f || viewH <= 0f) return
+                fun applyCover(videoW: Int, videoH: Int) {
+                    if (videoW <= 0 || videoH <= 0) return
+                    val viewW = width
+                    val viewH = height
+                    if (viewW <= 0 || viewH <= 0) return
 
-                        val scale = maxOf(viewW / videoW, viewH / videoH)
-                        val scaledW = videoW * scale
-                        val scaledH = videoH * scale
-                        val dx = (viewW - scaledW) / 2f
-                        val dy = (viewH - scaledH) / 2f
+                    // COVER: scale = max(view/video) — igual ao GIF
+                    val scale = maxOf(
+                        viewW.toFloat() / videoW,
+                        viewH.toFloat() / videoH,
+                    )
+                    val drawW = (videoW * scale).toInt().coerceAtLeast(1)
+                    val drawH = (videoH * scale).toInt().coerceAtLeast(1)
 
-                        val matrix = Matrix()
-                        matrix.setScale(scale, scale)
-                        matrix.postTranslate(dx, dy)
-                        view.setTransform(matrix)
-                    }
+                    textureView.layoutParams = FrameLayout.LayoutParams(drawW, drawH, Gravity.CENTER)
+                    textureView.requestLayout()
+                }
 
+                textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                     override fun onSurfaceTextureAvailable(
                         surface: SurfaceTexture,
                         width: Int,
@@ -99,14 +109,10 @@ fun VideoWallpaper(
                             mediaPlayer.isLooping = true
                             mediaPlayer.setVolume(0f, 0f)
                             mediaPlayer.setOnVideoSizeChangedListener { _, vw, vh ->
-                                applyCenterCrop(this@apply, vw, vh)
+                                post { applyCover(vw, vh) }
                             }
                             mediaPlayer.setOnPreparedListener { mp ->
-                                applyCenterCrop(
-                                    this@apply,
-                                    mp.videoWidth,
-                                    mp.videoHeight,
-                                )
+                                post { applyCover(mp.videoWidth, mp.videoHeight) }
                                 mp.start()
                             }
                             mediaPlayer.setOnErrorListener { _, _, _ -> true }
@@ -121,11 +127,9 @@ fun VideoWallpaper(
                         height: Int,
                     ) {
                         try {
-                            applyCenterCrop(
-                                this@apply,
-                                mediaPlayer.videoWidth,
-                                mediaPlayer.videoHeight,
-                            )
+                            post {
+                                applyCover(mediaPlayer.videoWidth, mediaPlayer.videoHeight)
+                            }
                         } catch (_: Exception) {
                         }
                     }
@@ -140,8 +144,18 @@ fun VideoWallpaper(
 
                     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
                 }
+
+                // Recalcular cover quando o FrameLayout mudar de tamanho (rotação / desktop)
+                addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                    try {
+                        if (mediaPlayer.videoWidth > 0 && mediaPlayer.videoHeight > 0) {
+                            applyCover(mediaPlayer.videoWidth, mediaPlayer.videoHeight)
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
             }
         },
-        update = { /* URI fixo via remember(source) */ },
+        update = { /* source fixo via remember */ },
     )
 }
