@@ -2,7 +2,6 @@ package com.minios.elizierdias.shell.mouse
 
 import android.os.SystemClock
 import android.view.MotionEvent
-import android.view.View
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -26,8 +25,8 @@ import androidx.compose.ui.unit.dp
  *
  * - Arrastar: move o cursor (mecânica original)
  * - Toque simples: clique na **posição do cursor**
- * - Duplo toque: duplo clique na posição do cursor (abrir apps, selecionar, etc.)
- * - Mouse OFF: este composable não desenha nem intercepta — touch normal
+ * - Duplo toque: duplo clique na posição do cursor
+ * - Mouse OFF: não intercepta — touch normal nos dedos
  */
 @Composable
 fun VirtualMouse(
@@ -49,42 +48,48 @@ fun VirtualMouse(
         val x = originInWindow.x + at.x
         val y = originInWindow.y + at.y
 
-        // Liberta o overlay um instante para o evento chegar às views por baixo
         intercepting = false
-        target.post {
+
+        fun fireOne(then: (() -> Unit)? = null) {
+            val downTime = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(
+                downTime,
+                downTime,
+                MotionEvent.ACTION_DOWN,
+                x,
+                y,
+                0,
+            )
+            val up = MotionEvent.obtain(
+                downTime,
+                downTime + 40,
+                MotionEvent.ACTION_UP,
+                x,
+                y,
+                0,
+            )
             try {
-                repeat(count) { i ->
-                    val downTime = SystemClock.uptimeMillis()
-                    val down = MotionEvent.obtain(
-                        downTime,
-                        downTime,
-                        MotionEvent.ACTION_DOWN,
-                        x,
-                        y,
-                        0,
-                    )
-                    val up = MotionEvent.obtain(
-                        downTime,
-                        downTime + 40,
-                        MotionEvent.ACTION_UP,
-                        x,
-                        y,
-                        0,
-                    )
-                    target.dispatchTouchEvent(down)
-                    target.dispatchTouchEvent(up)
-                    down.recycle()
-                    up.recycle()
-                    if (i < count - 1) {
-                        try {
-                            Thread.sleep(80)
-                        } catch (_: InterruptedException) {
-                        }
-                    }
-                }
+                target.dispatchTouchEvent(down)
+                target.dispatchTouchEvent(up)
             } finally {
-                target.post {
-                    intercepting = true
+                down.recycle()
+                up.recycle()
+            }
+            then?.invoke()
+        }
+
+        target.post {
+            if (count <= 1) {
+                fireOne {
+                    target.post { intercepting = true }
+                }
+            } else {
+                fireOne {
+                    target.postDelayed({
+                        fireOne {
+                            target.post { intercepting = true }
+                        }
+                    }, 90L)
                 }
             }
         }
@@ -95,6 +100,13 @@ fun VirtualMouse(
             .fillMaxSize()
             .onGloballyPositioned { coords ->
                 originInWindow = coords.positionInWindow()
+                if (!initialized && coords.size.width > 0 && coords.size.height > 0) {
+                    cursor = Offset(
+                        coords.size.width / 2f,
+                        coords.size.height / 2f,
+                    )
+                    initialized = true
+                }
             }
             .then(
                 if (intercepting) {
@@ -113,7 +125,6 @@ fun VirtualMouse(
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onTap = {
-                                    // Clique onde está o cursor (não move o cursor para o dedo)
                                     if (!initialized) {
                                         cursor = Offset(size.width / 2f, size.height / 2f)
                                         initialized = true
@@ -134,10 +145,7 @@ fun VirtualMouse(
                 },
             ),
     ) {
-        if (!initialized) {
-            // Centro do desktop na primeira utilização
-            return@Canvas
-        }
+        if (!initialized) return@Canvas
 
         val x = cursor.x
         val y = cursor.y
