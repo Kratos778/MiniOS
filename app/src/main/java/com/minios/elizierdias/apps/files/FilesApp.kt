@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -42,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -60,7 +60,7 @@ private data class FileEntry(
 @Composable
 fun FilesApp() {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val activity = context as? ComponentActivity
 
     var currentDir by remember { mutableStateOf<File?>(null) }
     var entries by remember { mutableStateOf<List<FileEntry>>(emptyList()) }
@@ -85,7 +85,6 @@ fun FilesApp() {
         if (granted) {
             errorMsg = ""
             currentDir = null
-            // load via LaunchedEffect(hasPermission)
         } else {
             errorMsg = "Permissão negada"
         }
@@ -198,15 +197,16 @@ fun FilesApp() {
     }
 
     // Ao voltar das Definições, revalida a permissão
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(activity) {
+        val owner = activity ?: return@DisposableEffect onDispose { }
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 refreshPermissionAndLoad()
             }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
+        owner.lifecycle.addObserver(observer)
         onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+            owner.lifecycle.removeObserver(observer)
         }
     }
 
