@@ -132,11 +132,14 @@ fun Desktop() {
 
                 isVideoWallpaper -> {
 
-                    VideoWallpaper(
-                        source = wallpaperUri,
-                        modifier = Modifier.fillMaxSize(),
-                        soundEnabled = wallpaperVideoSound,
-                    )
+                    // key força recriar o player ao mudar de vídeo → vídeo
+                    key(wallpaperUri, wallpaperVideoSound) {
+                        VideoWallpaper(
+                            source = wallpaperUri,
+                            modifier = Modifier.fillMaxSize(),
+                            soundEnabled = wallpaperVideoSound,
+                        )
+                    }
                 }
 
                 wallpaperUri.isNotBlank() -> {
