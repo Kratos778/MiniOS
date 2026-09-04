@@ -1,0 +1,30 @@
+MiniOS
+Copyright (c) 2026 Elizier Layerti Gungui Dias
+
+This product includes software developed by Elizier Layerti Gungui Dias
+(https://github.com/Kratos778).
+
+Country of origin of the original work: Angola.
+Contact: elizierdias833@gmail.com / elizierdias83@gmail.com
+
+Licensed under the MIT License. See the file LICENSE for the full text.
+
+----------------------------------------------------------------------
+
+This product uses third-party open-source components. Required notices and
+attributions for those components are set out in THIRD_PARTY_NOTICES.md,
+including but not limited to:
+
+  - AndroidX and Jetpack Compose (Apache License 2.0)
+  - Kotlin and kotlinx-coroutines (Apache License 2.0)
+  - Coil (Apache License 2.0)
+
+----------------------------------------------------------------------
+
+The name "MiniOS", the associated logo, and "MediaPlayerOS" are used to
+identify this project. See TRADEMARKS.md for usage guidelines.
+
+----------------------------------------------------------------------
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. See LICENSE
+for the full disclaimer of warranty and limitation of liability.
