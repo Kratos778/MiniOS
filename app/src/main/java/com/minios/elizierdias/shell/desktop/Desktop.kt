@@ -64,11 +64,15 @@ fun Desktop() {
     }
 
     val wallpaperId by config.wallpaperId.collectAsState(
-        initial = "default_gradient"
+        initial = "default_gradient",
     )
 
     val wallpaperUri by config.wallpaperUri.collectAsState(
-        initial = ""
+        initial = "",
+    )
+
+    val wallpaperVideoSound by config.wallpaperVideoSound.collectAsState(
+        initial = false,
     )
 
     val wallpaper = Wallpapers.byId(wallpaperId)
@@ -85,15 +89,15 @@ fun Desktop() {
         mutableStateOf(
             Size(
                 1280f,
-                676f
-            )
+                676f,
+            ),
         )
     }
 
     val isGifWallpaper =
         wallpaperUri.endsWith(
             ".gif",
-            ignoreCase = true
+            ignoreCase = true,
         )
 
     val isVideoWallpaper =
@@ -104,7 +108,7 @@ fun Desktop() {
             wallpaperUri.endsWith(".mov", ignoreCase = true)
 
     Column(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize(),
     ) {
 
         Box(
@@ -115,9 +119,9 @@ fun Desktop() {
 
                     desktopSizePx = Size(
                         size.width.toFloat(),
-                        size.height.toFloat()
+                        size.height.toFloat(),
                     )
-                }
+                },
         ) {
 
             when {
@@ -126,7 +130,7 @@ fun Desktop() {
 
                     AnimatedWallpaper(
                         source = wallpaperUri,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
 
@@ -134,7 +138,8 @@ fun Desktop() {
 
                     VideoWallpaper(
                         source = wallpaperUri,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        soundEnabled = wallpaperVideoSound,
                     )
                 }
 
@@ -142,11 +147,11 @@ fun Desktop() {
 
                     Image(
                         painter = rememberAsyncImagePainter(
-                            model = wallpaperUri
+                            model = wallpaperUri,
                         ),
                         contentDescription = "Wallpaper",
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
+                        contentScale = ContentScale.Crop,
                     )
                 }
 
@@ -156,8 +161,8 @@ fun Desktop() {
                         modifier = Modifier
                             .fillMaxSize()
                             .background(
-                                wallpaper.brush
-                            )
+                                wallpaper.brush,
+                            ),
                     )
                 }
             }
@@ -168,7 +173,7 @@ fun Desktop() {
                     .padding(16.dp),
 
                 verticalArrangement =
-                    Arrangement.spacedBy(18.dp)
+                Arrangement.spacedBy(18.dp),
             ) {
 
                 AppRegistry.all.forEach { app ->
@@ -182,9 +187,9 @@ fun Desktop() {
 
                             windowManager.openApp(
                                 app,
-                                desktopSizePx
+                                desktopSizePx,
                             )
-                        }
+                        },
                     )
                 }
             }
@@ -203,7 +208,7 @@ fun Desktop() {
                             onFocus = {
 
                                 windowManager.focus(
-                                    window.instanceId
+                                    window.instanceId,
                                 )
                             },
 
@@ -211,7 +216,7 @@ fun Desktop() {
 
                                 windowManager.move(
                                     window.instanceId,
-                                    position
+                                    position,
                                 )
                             },
 
@@ -219,21 +224,21 @@ fun Desktop() {
 
                                 windowManager.resize(
                                     window.instanceId,
-                                    size
+                                    size,
                                 )
                             },
 
                             onClose = {
 
                                 windowManager.close(
-                                    window.instanceId
+                                    window.instanceId,
                                 )
                             },
 
                             onMinimize = {
 
                                 windowManager.minimize(
-                                    window.instanceId
+                                    window.instanceId,
                                 )
                             },
 
@@ -241,9 +246,9 @@ fun Desktop() {
 
                                 windowManager.toggleMaximize(
                                     window.instanceId,
-                                    desktopSizePx
+                                    desktopSizePx,
                                 )
-                            }
+                            },
                         ) {
 
                             when (window.app.id) {
@@ -275,9 +280,9 @@ fun Desktop() {
                                 else -> {
                                     Text(
                                         text =
-                                            "App: ${window.app.id}",
+                                        "App: ${window.app.id}",
                                         color =
-                                            Color.White
+                                        Color.White,
                                     )
                                 }
                             }
@@ -297,35 +302,35 @@ fun Desktop() {
 
                         windowManager.openApp(
                             app,
-                            desktopSizePx
+                            desktopSizePx,
                         )
                     },
 
                     onDismiss = {
                         startMenuOpen = false
-                    }
+                    },
                 )
             }
 
             VirtualMouse(
                 enabled = mouseEnabled,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
             )
         }
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(44.dp)
+                .height(44.dp),
         ) {
 
             Taskbar(
 
                 openWindows =
-                    windowManager.windows,
+                windowManager.windows,
 
                 mouseEnabled =
-                    mouseEnabled,
+                mouseEnabled,
 
                 onMouseToggle = { enabled ->
                     mouseEnabled = enabled
@@ -353,7 +358,7 @@ fun Desktop() {
                     } else {
                         windowManager.restore(id)
                     }
-                }
+                },
             )
         }
     }
@@ -362,7 +367,7 @@ fun Desktop() {
 @Composable
 private fun DesktopIcon(
     app: MiniApp,
-    onOpen: () -> Unit
+    onOpen: () -> Unit,
 ) {
 
     Column(
@@ -373,37 +378,37 @@ private fun DesktopIcon(
             },
 
         horizontalAlignment =
-            Alignment.CenterHorizontally
+        Alignment.CenterHorizontally,
     ) {
 
         Icon(
             imageVector =
-                app.icon,
+            app.icon,
 
             contentDescription =
-                app.title,
+            app.title,
 
             tint =
-                Color.White,
+            Color.White,
 
             modifier =
-                Modifier.size(30.dp)
+            Modifier.size(30.dp),
         )
 
         Spacer(
             modifier =
-                Modifier.height(4.dp)
+            Modifier.height(4.dp),
         )
 
         Text(
             text =
-                app.title,
+            app.title,
 
             color =
-                Color.White,
+            Color.White,
 
             fontSize =
-                11.sp
+            11.sp,
         )
     }
 }
