@@ -255,19 +255,18 @@ fun BrowserApp() {
                             cacheMode = WebSettings.LOAD_DEFAULT
                             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
 
-                            // Layout tipo desktop — evita UI mobile gigante
+                            // Layout desktop fixo — adapta-se ao ecrã, sem zoom por pinça
                             useWideViewPort = true
                             loadWithOverviewMode = true
-                            setSupportZoom(true)
-                            builtInZoomControls = true
+                            setSupportZoom(false)
+                            builtInZoomControls = false
                             displayZoomControls = false
 
-                            // Texto / UI mais compactos (YouTube, TikTok, ChatGPT, etc.)
-                            textZoom = 75
-                            defaultFontSize = 14
+                            // Escala padrão compacta (fixixa)
+                            textZoom = 65
+                            defaultFontSize = 13
                             minimumFontSize = 8
 
-                            // User-Agent de computador
                             userAgentString =
                                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                                     "AppleWebKit/537.36 (KHTML, like Gecko) " +
@@ -302,7 +301,7 @@ fun BrowserApp() {
                             override fun onPageFinished(view: WebView, url: String?) {
                                 super.onPageFinished(view, url)
 
-                                // Força viewport desktop para sites que forçam mobile
+                                // Viewport fixo: sem zoom do utilizador, largura desktop padrão
                                 view.evaluateJavascript(
                                     """
                                     (function() {
@@ -314,7 +313,9 @@ fun BrowserApp() {
                                         document.head.appendChild(meta);
                                       }
                                       meta.setAttribute('content',
-                                        'width=' + w + ', initial-scale=1, maximum-scale=5, user-scalable=yes');
+                                        'width=' + w +
+                                        ', initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no');
+                                      document.documentElement.style.touchAction = 'pan-x pan-y';
                                     })();
                                     """.trimIndent(),
                                     null,
