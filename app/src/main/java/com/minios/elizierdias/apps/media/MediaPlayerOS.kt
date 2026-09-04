@@ -10,6 +10,7 @@ import android.provider.MediaStore
 import android.view.ViewGroup
 import android.widget.VideoView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,8 +25,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -35,8 +41,10 @@ import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -45,11 +53,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -64,8 +68,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -74,15 +80,17 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 
-/* ── VLC-like dark palette ─────────────────────────────────────────── */
-private val Bg = Color(0xFF1A1A1A)
-private val Panel = Color(0xFF242424)
-private val PanelAlt = Color(0xFF2A2A2A)
-private val Border = Color(0xFF3A3A3A)
-private val Accent = Color(0xFFFF6B00)
-private val TextPrimary = Color(0xFFE8E8E8)
-private val TextSecondary = Color(0xFF9A9A9A)
-private val SelectedBg = Color(0xFF333333)
+/* ── VLC dark palette (como nas fotos) ─────────────────────────────── */
+private val Bg = Color(0xFF1E1E1E)
+private val Sidebar = Color(0xFF252525)
+private val Panel = Color(0xFF2A2A2A)
+private val PanelAlt = Color(0xFF323232)
+private val Border = Color(0xFF3C3C3C)
+private val Accent = Color(0xFFFF8800)
+private val TextPrimary = Color(0xFFECECEC)
+private val TextSecondary = Color(0xFF9B9B9B)
+private val SelectedBg = Color(0xFF3A3A3A)
+private val PlaylistSel = Color(0xFF3D6EA5)
 
 private enum class MediaFilter { ALL, AUDIO, VIDEO }
 
@@ -220,13 +228,14 @@ fun MediaPlayerOS() {
     val keyboard = LocalSoftwareKeyboardController.current
 
     var library by remember { mutableStateOf<List<MediaEntry>>(emptyList()) }
-    var filter by remember { mutableStateOf(MediaFilter.ALL) }
+    var filter by remember { mutableStateOf(MediaFilter.AUDIO) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedIndex by remember { mutableIntStateOf(-1) }
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var currentDuration by remember { mutableLongStateOf(0L) }
     var volume by remember { mutableFloatStateOf(1f) }
+    var showPlaylist by remember { mutableStateOf(true) }
 
     val mediaPlayer = remember { MediaPlayer() }
 
@@ -370,352 +379,533 @@ fun MediaPlayerOS() {
         .toList()
 
     val selected = library.getOrNull(selectedIndex)
+    val progress = if (currentDuration > 0L) {
+        (currentPosition.toFloat() / currentDuration.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = Bg) {
-        Column(modifier = Modifier.fillMaxSize()) {
-
-            /* ── Top bar ──────────────────────────────────────────── */
-            Row(
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Bg),
+    ) {
+        /* ── Corpo principal: sidebar | conteúdo | playlist ─────────── */
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            /* Sidebar esquerda (estilo VLC) */
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Panel)
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .width(132.dp)
+                    .fillMaxHeight()
+                    .background(Sidebar)
+                    .padding(vertical = 8.dp),
             ) {
                 Text(
                     text = "MediaPlayerOS",
-                    color = TextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    color = Accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                 )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = "${library.size} ficheiros",
-                    color = TextSecondary,
-                    fontSize = 11.sp,
+
+                Spacer(Modifier.height(4.dp))
+
+                SidebarItem(
+                    label = "Música",
+                    icon = Icons.Filled.MusicNote,
+                    selected = filter == MediaFilter.AUDIO,
+                    onClick = { filter = MediaFilter.AUDIO },
                 )
+                SidebarItem(
+                    label = "Vídeos",
+                    icon = Icons.Filled.VideoLibrary,
+                    selected = filter == MediaFilter.VIDEO,
+                    onClick = { filter = MediaFilter.VIDEO },
+                )
+                SidebarItem(
+                    label = "Todos",
+                    icon = Icons.Filled.PlaylistPlay,
+                    selected = filter == MediaFilter.ALL,
+                    onClick = { filter = MediaFilter.ALL },
+                )
+
                 Spacer(Modifier.weight(1f))
-                IconButton(
+
+                SidebarItem(
+                    label = "Atualizar",
+                    icon = Icons.Filled.Refresh,
+                    selected = false,
                     onClick = {
                         library = loadMediaLibrary(context)
                         selectedIndex = -1
                         stopAudio()
                     },
-                    modifier = Modifier.size(32.dp),
-                ) {
-                    Icon(Icons.Filled.Refresh, "Atualizar", tint = TextSecondary, modifier = Modifier.size(18.dp))
-                }
+                )
             }
 
-            /* ── Search ───────────────────────────────────────────── */
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
+            /* Centro */
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                    .height(44.dp),
-                singleLine = true,
-                placeholder = {
-                    Text("Procurar…", color = TextSecondary, fontSize = 13.sp)
-                },
-                leadingIcon = {
-                    Icon(Icons.Filled.Search, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Filled.Clear, "Limpar", tint = TextSecondary, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary,
-                    focusedBorderColor = Accent,
-                    unfocusedBorderColor = Border,
-                    cursorColor = Accent,
-                    focusedContainerColor = PanelAlt,
-                    unfocusedContainerColor = PanelAlt,
-                ),
-                shape = RoundedCornerShape(6.dp),
-                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
-            )
-
-            /* ── Filters ──────────────────────────────────────────── */
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(Bg),
             ) {
-                listOf(
-                    MediaFilter.ALL to "Todos",
-                    MediaFilter.AUDIO to "Música",
-                    MediaFilter.VIDEO to "Vídeos",
-                ).forEach { (mode, label) ->
-                    val active = filter == mode
-                    TextButton(
-                        onClick = { filter = mode },
-                        modifier = Modifier.height(30.dp),
-                    ) {
-                        Text(
-                            text = label,
-                            color = if (active) Accent else TextSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                /* Barra de pesquisa compacta */
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                        .height(32.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(PanelAlt)
+                        .border(1.dp, Border, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Search, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        singleLine = true,
+                        textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
+                        cursorBrush = SolidColor(Accent),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { inner ->
+                            if (searchQuery.isEmpty()) {
+                                Text("Procurar…", color = TextSecondary, fontSize = 12.sp)
+                            }
+                            inner()
+                        },
+                    )
+                    if (searchQuery.isNotEmpty()) {
+                        Icon(
+                            Icons.Filled.Clear,
+                            null,
+                            tint = TextSecondary,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { searchQuery = "" },
                         )
                     }
                 }
-            }
 
-            Spacer(Modifier.height(4.dp))
+                Text(
+                    text = when (filter) {
+                        MediaFilter.AUDIO -> "Songs"
+                        MediaFilter.VIDEO -> "Videos"
+                        MediaFilter.ALL -> "Library"
+                    },
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
 
-            /* ── Body: list + player ──────────────────────────────── */
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-
-                /* Playlist */
-                Column(
+                /* Conteúdo: grelha estilo álbum OU vídeo */
+                Box(
                     modifier = Modifier
-                        .weight(0.48f)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Panel),
-                ) {
-                    Text(
-                        text = if (q.isEmpty()) "${visibleLibrary.size} itens" else "${visibleLibrary.size} resultados",
-                        color = TextSecondary,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    )
-
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(visibleLibrary, key = { "${it.id}_${it.isVideo}" }) { entry ->
-                            val realIndex = library.indexOfFirst {
-                                it.id == entry.id && it.isVideo == entry.isVideo
-                            }
-                            val isSelected = realIndex == selectedIndex
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(if (isSelected) SelectedBg else Color.Transparent)
-                                    .clickable {
-                                        selectedIndex = realIndex
-                                        if (entry.isVideo) stopAudio() else playAudio(entry)
-                                    }
-                                    .padding(horizontal = 10.dp, vertical = 7.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    imageVector = if (entry.isVideo) Icons.Filled.VideoLibrary else Icons.Filled.MusicNote,
-                                    contentDescription = null,
-                                    tint = if (entry.isVideo) Color(0xFF5B9BD5) else Accent,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = entry.title,
-                                        color = TextPrimary,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        text = formatDuration(entry.duration),
-                                        color = TextSecondary,
-                                        fontSize = 10.sp,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                /* Player panel */
-                Column(
-                    modifier = Modifier
-                        .weight(0.52f)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Panel)
-                        .padding(10.dp),
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp),
                 ) {
                     if (selected != null && selected.isVideo) {
                         AndroidView(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                                .clip(RoundedCornerShape(4.dp)),
                             factory = { ctx ->
                                 VideoView(ctx).apply {
                                     layoutParams = ViewGroup.LayoutParams(
                                         ViewGroup.LayoutParams.MATCH_PARENT,
                                         ViewGroup.LayoutParams.MATCH_PARENT,
                                     )
+                                    setOnPreparedListener { mp ->
+                                        currentDuration = mp.duration.toLong()
+                                        mp.start()
+                                        isPlaying = true
+                                    }
+                                    setOnCompletionListener { isPlaying = false }
+                                    setVideoURI(selected.uri)
+                                    start()
                                 }
                             },
                             update = { vv ->
-                                if (selected.uri != vv.tag) {
-                                    vv.tag = selected.uri
-                                    vv.setVideoURI(selected.uri)
-                                    vv.setOnPreparedListener { it.isLooping = false }
-                                    vv.start()
-                                }
+                                // se mudou de vídeo, o key no parent deve recriar
                             },
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = selected.title,
-                            color = TextPrimary,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    } else {
-                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center,
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color.Black),
+                        )
+                    } else if (filter == MediaFilter.AUDIO || filter == MediaFilter.ALL) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 100.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxSize(),
                         ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    Icons.Filled.PlayArrow,
-                                    null,
-                                    tint = Accent.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(48.dp),
+                            items(visibleLibrary.filter { !it.isVideo || filter == MediaFilter.ALL }, key = { "${it.id}_${it.isVideo}" }) { entry ->
+                                val realIndex = library.indexOfFirst {
+                                    it.id == entry.id && it.isVideo == entry.isVideo
+                                }
+                                val isSelected = realIndex == selectedIndex
+                                AlbumCard(
+                                    entry = entry,
+                                    selected = isSelected,
+                                    onClick = {
+                                        selectedIndex = realIndex
+                                        if (entry.isVideo) stopAudio() else playAudio(entry)
+                                    },
                                 )
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    text = selected?.title ?: "Nenhuma mídia selecionada",
-                                    color = TextPrimary,
-                                    fontSize = 13.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (selected != null) {
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        text = formatDuration(selected.duration),
-                                        color = TextSecondary,
-                                        fontSize = 11.sp,
+                            }
+                        }
+                    } else {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(visibleLibrary, key = { "${it.id}_${it.isVideo}" }) { entry ->
+                                val realIndex = library.indexOfFirst {
+                                    it.id == entry.id && it.isVideo == entry.isVideo
+                                }
+                                val isSelected = realIndex == selectedIndex
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(if (isSelected) SelectedBg else Color.Transparent)
+                                        .clickable {
+                                            selectedIndex = realIndex
+                                            if (entry.isVideo) stopAudio() else playAudio(entry)
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Icons.Filled.VideoLibrary,
+                                        null,
+                                        tint = Color(0xFF5B9BD5),
+                                        modifier = Modifier.size(18.dp),
                                     )
-                                } else {
-                                    Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        text = "Pesquisa automática · escreve o nome acima",
-                                        color = TextSecondary,
-                                        fontSize = 11.sp,
-                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            entry.title,
+                                            color = TextPrimary,
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            formatDuration(entry.duration),
+                                            color = TextSecondary,
+                                            fontSize = 10.sp,
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
+                }
+            }
 
-                    /* Controls (audio) */
-                    if (selected != null && !selected.isVideo) {
-                        Spacer(Modifier.height(6.dp))
-
-                        val progress = if (currentDuration > 0L) {
-                            (currentPosition.toFloat() / currentDuration.toFloat()).coerceIn(0f, 1f)
-                        } else 0f
-
-                        LinearProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(3.dp)
-                                .clip(RoundedCornerShape(2.dp)),
-                            color = Accent,
-                            trackColor = Border,
+            /* Playlist direita (estilo VLC) */
+            if (showPlaylist) {
+                Column(
+                    modifier = Modifier
+                        .width(168.dp)
+                        .fillMaxHeight()
+                        .background(Panel)
+                        .border(1.dp, Border),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(PanelAlt)
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Playlist",
+                            color = TextPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
                         )
+                        Text(
+                            text = "${visibleLibrary.size}",
+                            color = TextSecondary,
+                            fontSize = 10.sp,
+                        )
+                    }
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 2.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Text(formatDuration(currentPosition), color = TextSecondary, fontSize = 10.sp)
-                            Text(formatDuration(currentDuration), color = TextSecondary, fontSize = 10.sp)
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            IconButton(onClick = { previousAudio() }, modifier = Modifier.size(34.dp)) {
-                                Icon(Icons.Filled.SkipPrevious, null, tint = TextPrimary, modifier = Modifier.size(20.dp))
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        itemsIndexed(visibleLibrary, key = { _, e -> "${e.id}_${e.isVideo}" }) { _, entry ->
+                            val realIndex = library.indexOfFirst {
+                                it.id == entry.id && it.isVideo == entry.isVideo
                             }
-                            IconButton(onClick = { seekBy(-10_000) }, modifier = Modifier.size(34.dp)) {
-                                Icon(Icons.Filled.FastRewind, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
-                            }
-                            IconButton(onClick = { toggleAudio() }, modifier = Modifier.size(40.dp)) {
+                            val isSelected = realIndex == selectedIndex
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(if (isSelected) PlaylistSel else Color.Transparent)
+                                    .clickable {
+                                        selectedIndex = realIndex
+                                        if (entry.isVideo) stopAudio() else playAudio(entry)
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 Icon(
-                                    if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                    if (entry.isVideo) Icons.Filled.VideoLibrary else Icons.Filled.MusicNote,
                                     null,
-                                    tint = Accent,
-                                    modifier = Modifier.size(28.dp),
+                                    tint = if (isSelected) Color.White else if (entry.isVideo) Color(0xFF5B9BD5) else Accent,
+                                    modifier = Modifier.size(14.dp),
                                 )
-                            }
-                            IconButton(onClick = { seekBy(10_000) }, modifier = Modifier.size(34.dp)) {
-                                Icon(Icons.Filled.FastForward, null, tint = TextSecondary, modifier = Modifier.size(18.dp))
-                            }
-                            IconButton(onClick = { nextAudio() }, modifier = Modifier.size(34.dp)) {
-                                Icon(Icons.Filled.SkipNext, null, tint = TextPrimary, modifier = Modifier.size(20.dp))
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    volume = (volume - 0.1f).coerceAtLeast(0f)
-                                    try {
-                                        mediaPlayer.setVolume(volume, volume)
-                                    } catch (_: Exception) {
-                                    }
-                                },
-                                modifier = Modifier.size(30.dp),
-                            ) {
-                                Icon(Icons.Filled.VolumeDown, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-                            }
-                            Text(
-                                text = "${(volume * 100).toInt()}%",
-                                color = TextSecondary,
-                                fontSize = 11.sp,
-                                modifier = Modifier.width(36.dp),
-                            )
-                            IconButton(
-                                onClick = {
-                                    volume = (volume + 0.1f).coerceAtMost(1f)
-                                    try {
-                                        mediaPlayer.setVolume(volume, volume)
-                                    } catch (_: Exception) {
-                                    }
-                                },
-                                modifier = Modifier.size(30.dp),
-                            ) {
-                                Icon(Icons.Filled.VolumeUp, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        entry.title,
+                                        color = if (isSelected) Color.White else TextPrimary,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        formatDuration(entry.duration),
+                                        color = if (isSelected) Color(0xFFCCDDFF) else TextSecondary,
+                                        fontSize = 9.sp,
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+        /* ── Barra de player inferior (estilo VLC) ──────────────────── */
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Panel)
+                .border(width = 1.dp, color = Border)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                /* Cover placeholder */
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(PanelAlt),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        if (selected?.isVideo == true) Icons.Filled.VideoLibrary else Icons.Filled.MusicNote,
+                        null,
+                        tint = Accent,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = selected?.title ?: "Nada a reproduzir",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = selected?.displayName ?: "—",
+                        color = TextSecondary,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                /* Controlos */
+                IconButton(onClick = { previousAudio() }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.SkipPrevious, null, tint = TextPrimary, modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = { seekBy(-10_000) }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.FastRewind, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                }
+                IconButton(
+                    onClick = {
+                        if (selected?.isVideo == true) {
+                            // vídeo controlado pelo VideoView — toggle via isPlaying flag só visual
+                            isPlaying = !isPlaying
+                        } else {
+                            toggleAudio()
+                        }
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        null,
+                        tint = Accent,
+                        modifier = Modifier.size(26.dp),
+                    )
+                }
+                IconButton(onClick = { seekBy(10_000) }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.FastForward, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                }
+                IconButton(onClick = { nextAudio() }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.SkipNext, null, tint = TextPrimary, modifier = Modifier.size(18.dp))
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                IconButton(
+                    onClick = {
+                        volume = (volume - 0.1f).coerceAtLeast(0f)
+                        try {
+                            mediaPlayer.setVolume(volume, volume)
+                        } catch (_: Exception) {
+                        }
+                    },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(Icons.Filled.VolumeDown, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                }
+                Text(
+                    "${(volume * 100).toInt()}%",
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    modifier = Modifier.width(28.dp),
+                )
+                IconButton(
+                    onClick = {
+                        volume = (volume + 0.1f).coerceAtMost(1f)
+                        try {
+                            mediaPlayer.setVolume(volume, volume)
+                        } catch (_: Exception) {
+                        }
+                    },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(Icons.Filled.VolumeUp, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                }
+
+                IconButton(
+                    onClick = { showPlaylist = !showPlaylist },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(Icons.Filled.PlaylistPlay, null, tint = if (showPlaylist) Accent else TextSecondary, modifier = Modifier.size(16.dp))
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(formatDuration(currentPosition), color = TextSecondary, fontSize = 10.sp, modifier = Modifier.width(40.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = Accent,
+                    trackColor = Border,
+                )
+                Text(
+                    formatDuration(if (selected != null && selected.duration > 0) selected.duration else currentDuration),
+                    color = TextSecondary,
+                    fontSize = 10.sp,
+                    modifier = Modifier
+                        .width(40.dp)
+                        .padding(start = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SidebarItem(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (selected) SelectedBg else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            null,
+            tint = if (selected) Accent else TextSecondary,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            color = if (selected) TextPrimary else TextSecondary,
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+private fun AlbumCard(
+    entry: MediaEntry,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(if (selected) SelectedBg else Panel)
+            .border(1.dp, if (selected) Accent else Border, RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .padding(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(PanelAlt),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (entry.isVideo) Icons.Filled.VideoLibrary else Icons.Filled.MusicNote,
+                null,
+                tint = if (entry.isVideo) Color(0xFF5B9BD5) else Accent,
+                modifier = Modifier.size(28.dp),
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            entry.title,
+            color = TextPrimary,
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            formatDuration(entry.duration),
+            color = TextSecondary,
+            fontSize = 9.sp,
+        )
     }
 }
