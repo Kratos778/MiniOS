@@ -12,7 +12,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "0.3.2"
+        versionName = "0.3.3"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -52,9 +52,11 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("io.coil-kt:coil-compose:2.6.0")
 
-    // Video wallpaper 4K / H.264 — MediaPlayer nativo falha com level 5.1/5.2
+    // Video wallpaper — ExoPlayer + Transformer (4K → 720p ao importar)
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("androidx.media3:media3-transformer:1.4.1")
+    implementation("androidx.media3:media3-effect:1.4.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
