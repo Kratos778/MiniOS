@@ -165,7 +165,7 @@ fun SettingsApp() {
             Text("Escolher foto / GIF da galeria")
         }
 
-        Spacer(modifier.height(8.dp))
+        Spacer(Modifier.height(8.dp))
 
         Button(
             onClick = {
@@ -247,7 +247,7 @@ fun SettingsApp() {
         Spacer(Modifier.height(24.dp))
 
         Text(text = "Desempenho", color = Color(0xFFC9D1D9), fontSize = 14.sp)
-        Spacer(modifier.height(8.dp))
+        Spacer(Modifier.height(8.dp))
 
         PowerMode.entries.forEach { mode ->
             Row(
@@ -277,7 +277,7 @@ fun SettingsApp() {
             }
         }
 
-        Spacer(modifier.height(24.dp))
+        Spacer(Modifier.height(24.dp))
 
         Text(text = "Sobre", color = Color(0xFFC9D1D9), fontSize = 14.sp)
         Spacer(Modifier.height(4.dp))
@@ -287,7 +287,7 @@ fun SettingsApp() {
             color = Color(0xFF8B949E),
             fontSize = 11.sp,
         )
-        Spacer(modifier.height(24.dp))
+        Spacer(Modifier.height(24.dp))
         Text(text = "MiniOS v0.3", color = Color(0xFFC9D1D9), fontSize = 14.sp)
         Spacer(Modifier.height(6.dp))
         Text(
