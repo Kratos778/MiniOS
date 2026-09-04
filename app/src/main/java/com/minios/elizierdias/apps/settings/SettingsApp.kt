@@ -1,6 +1,5 @@
 package com.minios.elizierdias.apps.settings
 
-import androidx.compose.foundation.layout.size
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -15,12 +14,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -54,9 +55,17 @@ fun SettingsApp() {
 
     val wallpaper by config.wallpaperId.collectAsState(initial = "default_gradient")
     val wallpaperUri by config.wallpaperUri.collectAsState(initial = "")
+    val wallpaperVideoSound by config.wallpaperVideoSound.collectAsState(initial = false)
     val power by config.powerMode.collectAsState(initial = PowerMode.BALANCED)
 
     var statusMsg by remember { mutableStateOf("") }
+
+    val isVideoWallpaper =
+        wallpaperUri.endsWith(".mp4", true) ||
+            wallpaperUri.endsWith(".webm", true) ||
+            wallpaperUri.endsWith(".mkv", true) ||
+            wallpaperUri.endsWith(".3gp", true) ||
+            wallpaperUri.endsWith(".mov", true)
 
     fun saveAndApply(uri: Uri) {
         scope.launch {
@@ -156,7 +165,7 @@ fun SettingsApp() {
             Text("Escolher foto / GIF da galeria")
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier.height(8.dp))
 
         Button(
             onClick = {
@@ -182,10 +191,7 @@ fun SettingsApp() {
             Spacer(Modifier.height(6.dp))
             val kind = when {
                 wallpaperUri.endsWith(".gif", true) -> "GIF animado"
-                wallpaperUri.endsWith(".mp4", true) ||
-                    wallpaperUri.endsWith(".webm", true) ||
-                    wallpaperUri.endsWith(".mkv", true) ||
-                    wallpaperUri.endsWith(".3gp", true) -> "Vídeo em loop"
+                isVideoWallpaper -> "Vídeo em loop"
                 else -> "Imagem"
             }
             Text(
@@ -193,6 +199,44 @@ fun SettingsApp() {
                 color = Color(0xFF3FB950),
                 fontSize = 12.sp,
             )
+        }
+
+        // Som do vídeo wallpaper — só relevante com vídeo ativo
+        if (isVideoWallpaper) {
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        scope.launch {
+                            config.setWallpaperVideoSound(!wallpaperVideoSound)
+                        }
+                    }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Som no vídeo wallpaper",
+                        color = Color(0xFFC9D1D9),
+                        fontSize = 13.sp,
+                    )
+                    Text(
+                        text = if (wallpaperVideoSound) "Som ligado" else "Mudo",
+                        color = Color(0xFF8B949E),
+                        fontSize = 11.sp,
+                    )
+                }
+                Switch(
+                    checked = wallpaperVideoSound,
+                    onCheckedChange = { enabled ->
+                        scope.launch {
+                            config.setWallpaperVideoSound(enabled)
+                        }
+                    },
+                )
+            }
         }
 
         if (statusMsg.isNotEmpty()) {
@@ -203,7 +247,7 @@ fun SettingsApp() {
         Spacer(Modifier.height(24.dp))
 
         Text(text = "Desempenho", color = Color(0xFFC9D1D9), fontSize = 14.sp)
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier.height(8.dp))
 
         PowerMode.entries.forEach { mode ->
             Row(
@@ -233,7 +277,7 @@ fun SettingsApp() {
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(modifier.height(24.dp))
 
         Text(text = "Sobre", color = Color(0xFFC9D1D9), fontSize = 14.sp)
         Spacer(Modifier.height(4.dp))
@@ -243,7 +287,7 @@ fun SettingsApp() {
             color = Color(0xFF8B949E),
             fontSize = 11.sp,
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(modifier.height(24.dp))
         Text(text = "MiniOS v0.3", color = Color(0xFFC9D1D9), fontSize = 14.sp)
         Spacer(Modifier.height(6.dp))
         Text(
