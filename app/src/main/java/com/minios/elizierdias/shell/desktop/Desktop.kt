@@ -1,5 +1,6 @@
 package com.minios.elizierdias.shell.desktop
 
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -95,6 +96,38 @@ fun Desktop() {
         )
     }
 
+    fun launchApp(app: MiniApp) {
+
+        if (app.id == "smartplay") {
+
+            val intent =
+                context.packageManager
+                    .getLaunchIntentForPackage(
+                        "com.appplayysmartt",
+                    )
+
+            if (intent != null) {
+
+                context.startActivity(intent)
+
+            } else {
+
+                Toast.makeText(
+                    context,
+                    "SmartPlay não está instalado",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+
+        } else {
+
+            windowManager.openApp(
+                app,
+                desktopSizePx,
+            )
+        }
+    }
+
     val isGifWallpaper =
         wallpaperUri.endsWith(
             ".gif",
@@ -134,6 +167,7 @@ fun Desktop() {
 
                     // key força recriar o player ao mudar de vídeo → vídeo
                     key(wallpaperUri, wallpaperVideoSound) {
+
                         VideoWallpaper(
                             source = wallpaperUri,
                             modifier = Modifier.fillMaxSize(),
@@ -184,10 +218,7 @@ fun Desktop() {
 
                             startMenuOpen = false
 
-                            windowManager.openApp(
-                                app,
-                                desktopSizePx,
-                            )
+                            launchApp(app)
                         },
                     )
                 }
@@ -277,9 +308,11 @@ fun Desktop() {
                                 }
 
                                 else -> {
+
                                     Text(
                                         text =
                                         "App: ${window.app.id}",
+
                                         color =
                                         Color.White,
                                     )
@@ -299,10 +332,7 @@ fun Desktop() {
 
                         startMenuOpen = false
 
-                        windowManager.openApp(
-                            app,
-                            desktopSizePx,
-                        )
+                        launchApp(app)
                     },
 
                     onDismiss = {
@@ -353,8 +383,11 @@ fun Desktop() {
                         window.isFocused &&
                         !window.isMinimized
                     ) {
+
                         windowManager.minimize(id)
+
                     } else {
+
                         windowManager.restore(id)
                     }
                 },
