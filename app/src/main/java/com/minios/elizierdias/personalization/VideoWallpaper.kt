@@ -20,11 +20,14 @@ import java.io.File
 /**
  * Wallpaper de vídeo em loop com a **mesma mecânica** de GIF / JPG / PNG:
  * ContentScale.Crop — preenche o ecrã, centrado, corta o excesso, sem barras.
+ *
+ * @param soundEnabled se true, reproduz áudio; se false, volume 0.
  */
 @Composable
 fun VideoWallpaper(
     source: String,
     modifier: Modifier = Modifier,
+    soundEnabled: Boolean = false,
 ) {
     val context = LocalContext.current
 
@@ -39,6 +42,19 @@ fun VideoWallpaper(
     if (uri == null) return
 
     val mediaPlayer = remember(source) { MediaPlayer() }
+
+    // Atualiza volume sem mexer no crop / surface
+    DisposableEffect(soundEnabled) {
+        try {
+            if (soundEnabled) {
+                mediaPlayer.setVolume(1f, 1f)
+            } else {
+                mediaPlayer.setVolume(0f, 0f)
+            }
+        } catch (_: Exception) {
+        }
+        onDispose { }
+    }
 
     DisposableEffect(source) {
         onDispose {
@@ -84,7 +100,6 @@ fun VideoWallpaper(
                     val viewH = height
                     if (viewW <= 0 || viewH <= 0) return
 
-                    // COVER: scale = max(view/video) — igual ao GIF
                     val scale = maxOf(
                         viewW.toFloat() / videoW,
                         viewH.toFloat() / videoH,
@@ -94,6 +109,17 @@ fun VideoWallpaper(
 
                     textureView.layoutParams = FrameLayout.LayoutParams(drawW, drawH, Gravity.CENTER)
                     textureView.requestLayout()
+                }
+
+                fun applyVolume() {
+                    try {
+                        if (soundEnabled) {
+                            mediaPlayer.setVolume(1f, 1f)
+                        } else {
+                            mediaPlayer.setVolume(0f, 0f)
+                        }
+                    } catch (_: Exception) {
+                    }
                 }
 
                 textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
@@ -107,12 +133,13 @@ fun VideoWallpaper(
                             mediaPlayer.setDataSource(ctx, uri)
                             mediaPlayer.setSurface(Surface(surface))
                             mediaPlayer.isLooping = true
-                            mediaPlayer.setVolume(0f, 0f)
+                            applyVolume()
                             mediaPlayer.setOnVideoSizeChangedListener { _, vw, vh ->
                                 post { applyCover(vw, vh) }
                             }
                             mediaPlayer.setOnPreparedListener { mp ->
                                 post { applyCover(mp.videoWidth, mp.videoHeight) }
+                                applyVolume()
                                 mp.start()
                             }
                             mediaPlayer.setOnErrorListener { _, _, _ -> true }
@@ -145,7 +172,6 @@ fun VideoWallpaper(
                     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
                 }
 
-                // Recalcular cover quando o FrameLayout mudar de tamanho (rotação / desktop)
                 addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
                     try {
                         if (mediaPlayer.videoWidth > 0 && mediaPlayer.videoHeight > 0) {
@@ -156,6 +182,9 @@ fun VideoWallpaper(
                 }
             }
         },
-        update = { /* source fixo via remember */ },
+        update = { view ->
+            // Volume pode mudar em runtime via DisposableEffect; nada no layout
+            view
+        },
     )
 }
