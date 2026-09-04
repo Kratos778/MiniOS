@@ -16,7 +16,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import java.io.File
-import java.io.FileInputStream
 
 /**
  * Wallpaper de vídeo em loop com a **mesma mecânica** de GIF / JPG / PNG:
@@ -122,10 +121,7 @@ fun VideoWallpaper(
                             if (!file.exists() || file.length() == 0L) {
                                 throw IllegalStateException("Ficheiro de vídeo em falta")
                             }
-                            // FD é mais fiável que file:// URI em Android moderno
-                            FileInputStream(file).use { fis ->
-                                mediaPlayer.setDataSource(fis.fd)
-                            }
+                            mediaPlayer.setDataSource(file.absolutePath)
                         }
                         else -> throw IllegalArgumentException("Fonte inválida")
                     }
@@ -154,10 +150,7 @@ fun VideoWallpaper(
                                 } catch (_: Exception) {
                                 }
                             }
-                            mediaPlayer.setOnErrorListener { _, _, _ ->
-                                // true = erro tratado (evita crash); ecrã fica escuro se codec falhar
-                                true
-                            }
+                            mediaPlayer.setOnErrorListener { _, _, _ -> true }
                             mediaPlayer.prepareAsync()
                         } catch (_: Exception) {
                         }
