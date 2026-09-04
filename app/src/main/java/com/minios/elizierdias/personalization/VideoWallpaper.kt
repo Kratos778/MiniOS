@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -20,11 +21,7 @@ import java.io.File
 
 /**
  * Wallpaper de vídeo em loop (ContentScale.Crop via RESIZE_MODE_ZOOM).
- *
- * Usa **ExoPlayer** em vez de MediaPlayer nativo — o MediaPlayer falha
- * em muitos aparelhos com vídeos 4K H.264 (level 5.1/5.2), dando ecrã preto.
- *
- * @param soundEnabled se true, volume 1; se false, mudo.
+ * Buffers pequenos — wallpapers curtos em loop não precisam de fila grande.
  */
 @Composable
 fun VideoWallpaper(
@@ -46,16 +43,27 @@ fun VideoWallpaper(
     if (mediaUri == null) return
 
     val player = remember(source) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(mediaUri))
-            repeatMode = Player.REPEAT_MODE_ONE
-            volume = if (soundEnabled) 1f else 0f
-            playWhenReady = true
-            prepare()
-        }
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 1_000,
+                /* maxBufferMs = */ 3_000,
+                /* bufferForPlaybackMs = */ 500,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_000,
+            )
+            .build()
+
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .build()
+            .apply {
+                setMediaItem(MediaItem.fromUri(mediaUri))
+                repeatMode = Player.REPEAT_MODE_ONE
+                volume = if (soundEnabled) 1f else 0f
+                playWhenReady = true
+                prepare()
+            }
     }
 
-    // Volume em runtime sem recriar o player
     LaunchedEffect(soundEnabled) {
         try {
             player.volume = if (soundEnabled) 1f else 0f
@@ -85,11 +93,9 @@ fun VideoWallpaper(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 useController = false
-                // Igual a ContentScale.Crop — preenche e corta excesso
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 this.player = player
                 setBackgroundColor(0xFF0D1117.toInt())
-                // Evita surface preta em alguns OEMs
                 setShutterBackgroundColor(0xFF0D1117.toInt())
             }
         },
