@@ -89,14 +89,11 @@ fun SettingsApp() {
             statusMsg = "A guardar wallpaper..."
             val result = withContext(Dispatchers.IO) {
                 try {
-                    saveWallpaper(context, uri) { msg ->
-                        // atualiza status na main se precisar — aqui só IO
-                    }
+                    saveWallpaper(context, uri)
                 } catch (e: Exception) {
                     null to (e.message ?: "erro")
                 }
             }
-            // downscale pode demorar — mensagem intermédia
             val savedPath = result.first
             if (savedPath != null) {
                 config.setWallpaperUri(savedPath)
@@ -292,7 +289,8 @@ fun SettingsApp() {
 
         if (statusMsg.isNotEmpty()) {
             Spacer(Modifier.height(4.dp))
-            Text(text = statusMsg, color = Color(0xFF8B949E), fontSize = 11.sp)
+            Text(text = statusMsg, color = Color(0xFF8B949E),
+            fontSize = 11.sp)
         }
 
         Spacer(Modifier.height(24.dp))
@@ -359,13 +357,9 @@ internal fun isVideoPath(path: String): Boolean {
         p.endsWith(".mpg")
 }
 
-/**
- * Copia + se for vídeo 4K/alto, faz downscale para 720p com Media3 Transformer.
- */
 private suspend fun saveWallpaper(
     context: Context,
     uri: Uri,
-    onProgress: (String) -> Unit = {},
 ): Pair<String?, String> {
     val directory = File(context.filesDir, "wallpapers")
     if (!directory.exists()) directory.mkdirs()
@@ -386,7 +380,6 @@ private suspend fun saveWallpaper(
         return null to "Falha ao gravar"
     }
 
-    // Imagem / GIF — usa direto
     if (!isVideoPath(rawFile.absolutePath) && extension != ".mp4" && extension != ".webm") {
         val finalName = "wallpaper_${System.currentTimeMillis()}$extension"
         val finalFile = File(directory, finalName)
@@ -394,43 +387,36 @@ private suspend fun saveWallpaper(
         return finalFile.absolutePath to ""
     }
 
-    // Vídeo: medir resolução
     val (w, h) = readVideoSize(rawFile)
     val maxSide = maxOf(w, h)
 
     if (w <= 0 || h <= 0 || maxSide <= MAX_SIDE_BEFORE_SCALE) {
-        // Já é leve — renomeia e usa
         val finalFile = File(directory, "wallpaper_${System.currentTimeMillis()}.mp4")
         if (extension == ".mp4") {
             rawFile.renameTo(finalFile)
         } else {
-            // força .mp4 no path para isVideoPath + ExoPlayer
             rawFile.copyTo(finalFile, overwrite = true)
             rawFile.delete()
         }
         return finalFile.absolutePath to ""
     }
 
-    // 4K / alto → downscale 720p
-    onProgress("A reduzir 4K para 720p...")
     val outFile = File(directory, "wallpaper_${System.currentTimeMillis()}_720p.mp4")
     val ok = try {
         downscaleVideo(context, rawFile, outFile, MAX_WALLPAPER_HEIGHT)
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         false
     }
 
-    rawFile.delete()
-
-    return if (ok && outFile.exists() && outFile.length() > 0L) {
-        outFile.absolutePath to ""
-    } else {
-        outFile.delete()
-        // fallback: tenta usar o original (pode travar em 4K)
-        val fallback = File(directory, "wallpaper_${System.currentTimeMillis()}.mp4")
-        // já apagámos raw — não temos fallback útil
-        null to "Falha ao converter 4K. Tenta um vídeo 1080p ou inferior."
+    if (ok && outFile.exists() && outFile.length() > 0L) {
+        rawFile.delete()
+        return outFile.absolutePath to ""
     }
+
+    outFile.delete()
+    val fallback = File(directory, "wallpaper_${System.currentTimeMillis()}.mp4")
+    rawFile.renameTo(fallback)
+    return fallback.absolutePath to ""
 }
 
 private fun readVideoSize(file: File): Pair<Int, Int> {
@@ -480,15 +466,15 @@ private suspend fun downscaleVideo(
     val edited = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(input)))
         .setEffects(
             Effects(
-                /* audioProcessors = */ emptyList(),
-                /* videoEffects = */ listOf(Presentation.createForHeight(targetHeight)),
+                emptyList(),
+                listOf(Presentation.createForHeight(targetHeight)),
             ),
         )
         .build()
 
     try {
         transformer.start(edited, output.absolutePath)
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         if (cont.isActive) cont.resume(false)
         return@suspendCancellableCoroutine
     }
