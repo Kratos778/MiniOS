@@ -588,7 +588,7 @@ fun MediaPlayerOS() {
                                         modifier = Modifier.size(18.dp),
                                     )
                                     Spacer(Modifier.width(8.dp))
-                                    Column(Modifier = Modifier.weight(1f)) {
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             entry.title,
                                             color = TextPrimary,
