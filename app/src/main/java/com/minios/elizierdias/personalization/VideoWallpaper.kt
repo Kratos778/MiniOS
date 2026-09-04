@@ -1,27 +1,30 @@
 package com.minios.elizierdias.personalization
 
-import android.graphics.SurfaceTexture
-import android.media.MediaPlayer
 import android.net.Uri
-import android.view.Gravity
-import android.view.Surface
-import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import java.io.File
 
 /**
- * Wallpaper de vídeo em loop com a **mesma mecânica** de GIF / JPG / PNG:
- * ContentScale.Crop — preenche o ecrã, centrado, corta o excesso, sem barras.
+ * Wallpaper de vídeo em loop (ContentScale.Crop via RESIZE_MODE_ZOOM).
  *
- * @param soundEnabled se true, reproduz áudio; se false, volume 0.
+ * Usa **ExoPlayer** em vez de MediaPlayer nativo — o MediaPlayer falha
+ * em muitos aparelhos com vídeos 4K H.264 (level 5.1/5.2), dando ecrã preto.
+ *
+ * @param soundEnabled se true, volume 1; se false, mudo.
  */
 @Composable
 fun VideoWallpaper(
@@ -31,32 +34,43 @@ fun VideoWallpaper(
 ) {
     val context = LocalContext.current
 
-    val mediaPlayer = remember(source) { MediaPlayer() }
+    val mediaUri = remember(source) {
+        when {
+            source.startsWith("content://") -> Uri.parse(source)
+            source.startsWith("/") -> Uri.fromFile(File(source))
+            source.startsWith("file://") -> Uri.parse(source)
+            else -> null
+        }
+    }
 
-    DisposableEffect(soundEnabled) {
+    if (mediaUri == null) return
+
+    val player = remember(source) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(mediaUri))
+            repeatMode = Player.REPEAT_MODE_ONE
+            volume = if (soundEnabled) 1f else 0f
+            playWhenReady = true
+            prepare()
+        }
+    }
+
+    // Volume em runtime sem recriar o player
+    LaunchedEffect(soundEnabled) {
         try {
-            if (soundEnabled) {
-                mediaPlayer.setVolume(1f, 1f)
-            } else {
-                mediaPlayer.setVolume(0f, 0f)
-            }
+            player.volume = if (soundEnabled) 1f else 0f
         } catch (_: Exception) {
         }
-        onDispose { }
     }
 
     DisposableEffect(source) {
         onDispose {
             try {
-                mediaPlayer.stop()
+                player.stop()
             } catch (_: Exception) {
             }
             try {
-                mediaPlayer.reset()
-            } catch (_: Exception) {
-            }
-            try {
-                mediaPlayer.release()
+                player.release()
             } catch (_: Exception) {
             }
         }
@@ -65,131 +79,31 @@ fun VideoWallpaper(
     AndroidView(
         modifier = modifier.fillMaxSize(),
         factory = { ctx ->
-            FrameLayout(ctx).apply {
-                layoutParams = ViewGroup.LayoutParams(
+            PlayerView(ctx).apply {
+                layoutParams = FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
-                clipChildren = true
-                clipToPadding = true
+                useController = false
+                // Igual a ContentScale.Crop — preenche e corta excesso
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                this.player = player
                 setBackgroundColor(0xFF0D1117.toInt())
-
-                val textureView = TextureView(ctx).apply {
-                    layoutParams = FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        Gravity.CENTER,
-                    )
-                }
-                addView(textureView)
-
-                fun applyCover(videoW: Int, videoH: Int) {
-                    if (videoW <= 0 || videoH <= 0) return
-                    val viewW = width
-                    val viewH = height
-                    if (viewW <= 0 || viewH <= 0) return
-
-                    val scale = maxOf(
-                        viewW.toFloat() / videoW,
-                        viewH.toFloat() / videoH,
-                    )
-                    val drawW = (videoW * scale).toInt().coerceAtLeast(1)
-                    val drawH = (videoH * scale).toInt().coerceAtLeast(1)
-
-                    textureView.layoutParams = FrameLayout.LayoutParams(drawW, drawH, Gravity.CENTER)
-                    textureView.requestLayout()
-                }
-
-                fun applyVolume() {
-                    try {
-                        if (soundEnabled) {
-                            mediaPlayer.setVolume(1f, 1f)
-                        } else {
-                            mediaPlayer.setVolume(0f, 0f)
-                        }
-                    } catch (_: Exception) {
-                    }
-                }
-
-                fun bindDataSource() {
-                    when {
-                        source.startsWith("content://") -> {
-                            mediaPlayer.setDataSource(ctx, Uri.parse(source))
-                        }
-                        source.startsWith("/") -> {
-                            val file = File(source)
-                            if (!file.exists() || file.length() == 0L) {
-                                throw IllegalStateException("Ficheiro de vídeo em falta")
-                            }
-                            mediaPlayer.setDataSource(file.absolutePath)
-                        }
-                        else -> throw IllegalArgumentException("Fonte inválida")
-                    }
-                }
-
-                textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                    override fun onSurfaceTextureAvailable(
-                        surface: SurfaceTexture,
-                        width: Int,
-                        height: Int,
-                    ) {
-                        try {
-                            mediaPlayer.reset()
-                            bindDataSource()
-                            mediaPlayer.setSurface(Surface(surface))
-                            mediaPlayer.isLooping = true
-                            applyVolume()
-                            mediaPlayer.setOnVideoSizeChangedListener { _, vw, vh ->
-                                post { applyCover(vw, vh) }
-                            }
-                            mediaPlayer.setOnPreparedListener { mp ->
-                                post { applyCover(mp.videoWidth, mp.videoHeight) }
-                                applyVolume()
-                                try {
-                                    mp.start()
-                                } catch (_: Exception) {
-                                }
-                            }
-                            mediaPlayer.setOnErrorListener { _, _, _ -> true }
-                            mediaPlayer.prepareAsync()
-                        } catch (_: Exception) {
-                        }
-                    }
-
-                    override fun onSurfaceTextureSizeChanged(
-                        surface: SurfaceTexture,
-                        width: Int,
-                        height: Int,
-                    ) {
-                        try {
-                            post {
-                                applyCover(mediaPlayer.videoWidth, mediaPlayer.videoHeight)
-                            }
-                        } catch (_: Exception) {
-                        }
-                    }
-
-                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                        try {
-                            mediaPlayer.setSurface(null)
-                        } catch (_: Exception) {
-                        }
-                        return true
-                    }
-
-                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-                }
-
-                addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-                    try {
-                        if (mediaPlayer.videoWidth > 0 && mediaPlayer.videoHeight > 0) {
-                            applyCover(mediaPlayer.videoWidth, mediaPlayer.videoHeight)
-                        }
-                    } catch (_: Exception) {
-                    }
-                }
+                // Evita surface preta em alguns OEMs
+                setShutterBackgroundColor(0xFF0D1117.toInt())
             }
         },
-        update = { view -> view },
+        update = { view ->
+            if (view.player !== player) {
+                view.player = player
+            }
+            try {
+                player.volume = if (soundEnabled) 1f else 0f
+            } catch (_: Exception) {
+            }
+            if (!player.isPlaying && player.playbackState == Player.STATE_READY) {
+                player.play()
+            }
+        },
     )
 }
