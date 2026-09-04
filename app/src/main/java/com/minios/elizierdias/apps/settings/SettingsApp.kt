@@ -2,9 +2,11 @@ package com.minios.elizierdias.apps.settings
 
 import android.content.Context
 import android.content.Intent
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,13 +40,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.Presentation
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.Effects
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.Transformer
 import com.minios.elizierdias.core.MiniOSConfig
 import com.minios.elizierdias.core.PowerMode
 import com.minios.elizierdias.personalization.Wallpapers
+import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
+
+/** Altura máxima do vídeo wallpaper após import (evita freeze com 4K). */
+private const val MAX_WALLPAPER_HEIGHT = 720
+
+/** Se o lado maior for maior que isto, faz downscale. */
+private const val MAX_SIDE_BEFORE_SCALE = 1280
 
 @Composable
 fun SettingsApp() {
@@ -69,11 +89,14 @@ fun SettingsApp() {
             statusMsg = "A guardar wallpaper..."
             val result = withContext(Dispatchers.IO) {
                 try {
-                    saveWallpaper(context, uri)
+                    saveWallpaper(context, uri) { msg ->
+                        // atualiza status na main se precisar — aqui só IO
+                    }
                 } catch (e: Exception) {
                     null to (e.message ?: "erro")
                 }
             }
+            // downscale pode demorar — mensagem intermédia
             val savedPath = result.first
             if (savedPath != null) {
                 config.setWallpaperUri(savedPath)
@@ -96,11 +119,9 @@ fun SettingsApp() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION,
             )
         } catch (_: Exception) {
-            // GetContent nem sempre permite persistable — ok
         }
     }
 
-    // Galeria de fotos / GIF (MediaStore)
     val pickImage = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
     ) { uri: Uri? ->
@@ -111,7 +132,6 @@ fun SettingsApp() {
         saveAndApply(uri)
     }
 
-    // Vídeos indexados na galeria
     val pickVideoGallery = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
     ) { uri: Uri? ->
@@ -119,10 +139,10 @@ fun SettingsApp() {
             statusMsg = "Nenhum vídeo escolhido"
             return@rememberLauncherForActivityResult
         }
+        statusMsg = "A processar vídeo (4K → 720p se necessário)..."
         saveAndApply(uri)
     }
 
-    // Qualquer ficheiro no armazenamento (inclui vídeos que a galeria não mostra)
     val pickAnyDocument = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
@@ -131,6 +151,7 @@ fun SettingsApp() {
             return@rememberLauncherForActivityResult
         }
         takePersist(uri)
+        statusMsg = "A processar ficheiro..."
         saveAndApply(uri)
     }
 
@@ -199,7 +220,6 @@ fun SettingsApp() {
         OutlinedButton(
             onClick = {
                 statusMsg = ""
-                // OpenDocument vê ficheiros reais (Downloads, etc.), não só a galeria
                 pickAnyDocument.launch(
                     arrayOf(
                         "video/*",
@@ -214,7 +234,7 @@ fun SettingsApp() {
 
         Spacer(Modifier.height(4.dp))
         Text(
-            text = "Se o vídeo não aparece na galeria, usa «Escolher ficheiro».",
+            text = "Vídeos 4K são convertidos para 720p (evita travar o telemóvel).",
             color = Color(0xFF8B949E),
             fontSize = 11.sp,
         )
@@ -312,9 +332,9 @@ fun SettingsApp() {
 
         Text(text = "Sobre", color = Color(0xFFC9D1D9), fontSize = 14.sp)
         Spacer(Modifier.height(4.dp))
-        Text(text = "MiniOS 0.3.1", color = Color(0xFF8B949E), fontSize = 12.sp)
+        Text(text = "MiniOS 0.3.3", color = Color(0xFF8B949E), fontSize = 12.sp)
         Text(
-            text = "Wallpaper: foto · GIF · vídeo (ficheiros + galeria)",
+            text = "Wallpaper vídeo: auto 720p · sem freeze 4K",
             color = Color(0xFF8B949E),
             fontSize = 11.sp,
         )
@@ -322,7 +342,6 @@ fun SettingsApp() {
     }
 }
 
-/** Extensões / caminhos que contam como vídeo no Desktop. */
 internal fun isVideoPath(path: String): Boolean {
     if (path.isBlank()) return false
     val p = path.lowercase()
@@ -341,42 +360,148 @@ internal fun isVideoPath(path: String): Boolean {
 }
 
 /**
- * Copia o URI para storage interno e devolve path + mensagem de erro.
- * Detecta o tipo real por MIME, nome e magic bytes (evita .bin → ecrã preto).
+ * Copia + se for vídeo 4K/alto, faz downscale para 720p com Media3 Transformer.
  */
-private fun saveWallpaper(context: Context, uri: Uri): Pair<String?, String> {
+private suspend fun saveWallpaper(
+    context: Context,
+    uri: Uri,
+    onProgress: (String) -> Unit = {},
+): Pair<String?, String> {
     val directory = File(context.filesDir, "wallpapers")
     if (!directory.exists()) directory.mkdirs()
 
     val mime = context.contentResolver.getType(uri)?.lowercase()
-    val nameHint = (
-        uri.lastPathSegment
-            ?: uri.path
-            ?: ""
-        ).lowercase()
+    val nameHint = (uri.lastPathSegment ?: uri.path ?: "").lowercase()
 
-    // 1) Lê bytes
     val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
         ?: return null to "Não foi possível ler o ficheiro"
 
     if (bytes.isEmpty()) return null to "Ficheiro vazio"
 
-    // 2) Extensão por MIME / nome / magic bytes
     val extension = resolveExtension(mime, nameHint, bytes)
+    val rawFile = File(directory, "wallpaper_raw_${System.currentTimeMillis()}$extension")
+    rawFile.writeBytes(bytes)
 
-    val filename = "wallpaper_${System.currentTimeMillis()}$extension"
-    val destination = File(directory, filename)
-    destination.writeBytes(bytes)
-
-    if (!destination.exists() || destination.length() == 0L) {
+    if (!rawFile.exists() || rawFile.length() == 0L) {
         return null to "Falha ao gravar"
     }
 
-    return destination.absolutePath to ""
+    // Imagem / GIF — usa direto
+    if (!isVideoPath(rawFile.absolutePath) && extension != ".mp4" && extension != ".webm") {
+        val finalName = "wallpaper_${System.currentTimeMillis()}$extension"
+        val finalFile = File(directory, finalName)
+        rawFile.renameTo(finalFile)
+        return finalFile.absolutePath to ""
+    }
+
+    // Vídeo: medir resolução
+    val (w, h) = readVideoSize(rawFile)
+    val maxSide = maxOf(w, h)
+
+    if (w <= 0 || h <= 0 || maxSide <= MAX_SIDE_BEFORE_SCALE) {
+        // Já é leve — renomeia e usa
+        val finalFile = File(directory, "wallpaper_${System.currentTimeMillis()}.mp4")
+        if (extension == ".mp4") {
+            rawFile.renameTo(finalFile)
+        } else {
+            // força .mp4 no path para isVideoPath + ExoPlayer
+            rawFile.copyTo(finalFile, overwrite = true)
+            rawFile.delete()
+        }
+        return finalFile.absolutePath to ""
+    }
+
+    // 4K / alto → downscale 720p
+    onProgress("A reduzir 4K para 720p...")
+    val outFile = File(directory, "wallpaper_${System.currentTimeMillis()}_720p.mp4")
+    val ok = try {
+        downscaleVideo(context, rawFile, outFile, MAX_WALLPAPER_HEIGHT)
+    } catch (e: Exception) {
+        false
+    }
+
+    rawFile.delete()
+
+    return if (ok && outFile.exists() && outFile.length() > 0L) {
+        outFile.absolutePath to ""
+    } else {
+        outFile.delete()
+        // fallback: tenta usar o original (pode travar em 4K)
+        val fallback = File(directory, "wallpaper_${System.currentTimeMillis()}.mp4")
+        // já apagámos raw — não temos fallback útil
+        null to "Falha ao converter 4K. Tenta um vídeo 1080p ou inferior."
+    }
+}
+
+private fun readVideoSize(file: File): Pair<Int, Int> {
+    val r = MediaMetadataRetriever()
+    return try {
+        r.setDataSource(file.absolutePath)
+        val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+        val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+        w to h
+    } catch (_: Exception) {
+        0 to 0
+    } finally {
+        try {
+            r.release()
+        } catch (_: Exception) {
+        }
+    }
+}
+
+@OptIn(UnstableApi::class)
+private suspend fun downscaleVideo(
+    context: Context,
+    input: File,
+    output: File,
+    targetHeight: Int,
+): Boolean = suspendCancellableCoroutine { cont ->
+    val transformer = Transformer.Builder(context)
+        .setVideoMimeType(MimeTypes.VIDEO_H264)
+        .setAudioMimeType(MimeTypes.AUDIO_AAC)
+        .addListener(
+            object : Transformer.Listener {
+                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                    if (cont.isActive) cont.resume(true)
+                }
+
+                override fun onError(
+                    composition: Composition,
+                    exportResult: ExportResult,
+                    exportException: ExportException,
+                ) {
+                    if (cont.isActive) cont.resume(false)
+                }
+            },
+        )
+        .build()
+
+    val edited = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(input)))
+        .setEffects(
+            Effects(
+                /* audioProcessors = */ emptyList(),
+                /* videoEffects = */ listOf(Presentation.createForHeight(targetHeight)),
+            ),
+        )
+        .build()
+
+    try {
+        transformer.start(edited, output.absolutePath)
+    } catch (e: Exception) {
+        if (cont.isActive) cont.resume(false)
+        return@suspendCancellableCoroutine
+    }
+
+    cont.invokeOnCancellation {
+        try {
+            transformer.cancel()
+        } catch (_: Exception) {
+        }
+    }
 }
 
 private fun resolveExtension(mime: String?, nameHint: String, bytes: ByteArray): String {
-    // MIME
     when {
         mime == "image/jpeg" || mime == "image/jpg" -> return ".jpg"
         mime == "image/png" -> return ".png"
@@ -392,7 +517,6 @@ private fun resolveExtension(mime: String?, nameHint: String, bytes: ByteArray):
         mime?.startsWith("image/") == true -> return ".img"
     }
 
-    // Nome do ficheiro
     listOf(
         ".gif", ".mp4", ".webm", ".mkv", ".3gp", ".mov", ".m4v",
         ".avi", ".ts", ".m2ts", ".flv", ".mpeg", ".mpg",
@@ -403,41 +527,27 @@ private fun resolveExtension(mime: String?, nameHint: String, bytes: ByteArray):
         }
     }
 
-    // Magic bytes
     if (bytes.size >= 12) {
-        // GIF
         if (bytes[0] == 'G'.code.toByte() && bytes[1] == 'I'.code.toByte() && bytes[2] == 'F'.code.toByte()) {
             return ".gif"
         }
-        // PNG
         if (bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte() && bytes[2] == 'N'.code.toByte()) {
             return ".png"
         }
-        // JPEG
         if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) {
             return ".jpg"
         }
-        // WebM / Matroska (EBML)
         if (bytes[0] == 0x1A.toByte() && bytes[1] == 0x45.toByte() &&
             bytes[2] == 0xDF.toByte() && bytes[3] == 0xA3.toByte()
         ) {
             return ".webm"
         }
-        // MP4 / MOV / M4V — "ftyp" at offset 4
         if (bytes[4] == 'f'.code.toByte() && bytes[5] == 't'.code.toByte() &&
             bytes[6] == 'y'.code.toByte() && bytes[7] == 'p'.code.toByte()
         ) {
             val brand = String(bytes, 8, minOf(4, bytes.size - 8))
-            return when {
-                brand.startsWith("qt") -> ".mov"
-                else -> ".mp4"
-            }
+            return if (brand.startsWith("qt")) ".mov" else ".mp4"
         }
-    }
-
-    // Se o MIME era desconhecido mas o utilizador veio do picker de vídeo, assume mp4
-    if (mime == null || mime == "application/octet-stream") {
-        return ".mp4"
     }
 
     return ".mp4"
