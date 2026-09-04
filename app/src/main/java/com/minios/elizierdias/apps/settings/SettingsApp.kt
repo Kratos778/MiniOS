@@ -1,6 +1,7 @@
 package com.minios.elizierdias.apps.settings
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -60,32 +61,46 @@ fun SettingsApp() {
 
     var statusMsg by remember { mutableStateOf("") }
 
-    val isVideoWallpaper =
-        wallpaperUri.endsWith(".mp4", true) ||
-            wallpaperUri.endsWith(".webm", true) ||
-            wallpaperUri.endsWith(".mkv", true) ||
-            wallpaperUri.endsWith(".3gp", true) ||
-            wallpaperUri.endsWith(".mov", true)
+    val isVideoWallpaper = isVideoPath(wallpaperUri)
+    val isGifWallpaper = wallpaperUri.endsWith(".gif", true)
 
     fun saveAndApply(uri: Uri) {
         scope.launch {
             statusMsg = "A guardar wallpaper..."
-            val savedPath = withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 try {
                     saveWallpaper(context, uri)
-                } catch (_: Exception) {
-                    null
+                } catch (e: Exception) {
+                    null to (e.message ?: "erro")
                 }
             }
+            val savedPath = result.first
             if (savedPath != null) {
                 config.setWallpaperUri(savedPath)
-                statusMsg = "Wallpaper personalizado ativo"
+                val kind = when {
+                    isVideoPath(savedPath) -> "vídeo"
+                    savedPath.endsWith(".gif", true) -> "GIF"
+                    else -> "imagem"
+                }
+                statusMsg = "Wallpaper $kind ativo"
             } else {
-                statusMsg = "Erro ao guardar o ficheiro"
+                statusMsg = "Erro ao guardar: ${result.second}"
             }
         }
     }
 
+    fun takePersist(uri: Uri) {
+        try {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        } catch (_: Exception) {
+            // GetContent nem sempre permite persistable — ok
+        }
+    }
+
+    // Galeria de fotos / GIF (MediaStore)
     val pickImage = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
     ) { uri: Uri? ->
@@ -96,7 +111,8 @@ fun SettingsApp() {
         saveAndApply(uri)
     }
 
-    val pickVideo = rememberLauncherForActivityResult(
+    // Vídeos indexados na galeria
+    val pickVideoGallery = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
     ) { uri: Uri? ->
         if (uri == null) {
@@ -106,13 +122,15 @@ fun SettingsApp() {
         saveAndApply(uri)
     }
 
-    val pickAny = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent(),
+    // Qualquer ficheiro no armazenamento (inclui vídeos que a galeria não mostra)
+    val pickAnyDocument = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         if (uri == null) {
             statusMsg = "Nenhum ficheiro escolhido"
             return@rememberLauncherForActivityResult
         }
+        takePersist(uri)
         saveAndApply(uri)
     }
 
@@ -170,10 +188,10 @@ fun SettingsApp() {
         Button(
             onClick = {
                 statusMsg = ""
-                pickVideo.launch("video/*")
+                pickVideoGallery.launch("video/*")
             },
         ) {
-            Text("Escolher vídeo como wallpaper")
+            Text("Escolher vídeo da galeria")
         }
 
         Spacer(Modifier.height(8.dp))
@@ -181,16 +199,30 @@ fun SettingsApp() {
         OutlinedButton(
             onClick = {
                 statusMsg = ""
-                pickAny.launch("*/*")
+                // OpenDocument vê ficheiros reais (Downloads, etc.), não só a galeria
+                pickAnyDocument.launch(
+                    arrayOf(
+                        "video/*",
+                        "image/*",
+                        "application/octet-stream",
+                    ),
+                )
             },
         ) {
-            Text("Escolher ficheiro (imagem ou vídeo)")
+            Text("Escolher ficheiro (Downloads / ficheiros)")
         }
+
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Se o vídeo não aparece na galeria, usa «Escolher ficheiro».",
+            color = Color(0xFF8B949E),
+            fontSize = 11.sp,
+        )
 
         if (wallpaperUri.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             val kind = when {
-                wallpaperUri.endsWith(".gif", true) -> "GIF animado"
+                isGifWallpaper -> "GIF animado"
                 isVideoWallpaper -> "Vídeo em loop"
                 else -> "Imagem"
             }
@@ -201,7 +233,6 @@ fun SettingsApp() {
             )
         }
 
-        // Som do vídeo wallpaper — só relevante com vídeo ativo
         if (isVideoWallpaper) {
             Spacer(Modifier.height(12.dp))
             Row(
@@ -281,17 +312,9 @@ fun SettingsApp() {
 
         Text(text = "Sobre", color = Color(0xFFC9D1D9), fontSize = 14.sp)
         Spacer(Modifier.height(4.dp))
-        Text(text = "MiniOS 0.3.0", color = Color(0xFF8B949E), fontSize = 12.sp)
+        Text(text = "MiniOS 0.3.1", color = Color(0xFF8B949E), fontSize = 12.sp)
         Text(
-            text = "Wallpaper: foto · GIF · vídeo · Desktop landscape",
-            color = Color(0xFF8B949E),
-            fontSize = 11.sp,
-        )
-        Spacer(Modifier.height(24.dp))
-        Text(text = "MiniOS v0.3", color = Color(0xFFC9D1D9), fontSize = 14.sp)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "MediaPlayerOS com pesquisa · Wallpaper de vídeo",
+            text = "Wallpaper: foto · GIF · vídeo (ficheiros + galeria)",
             color = Color(0xFF8B949E),
             fontSize = 11.sp,
         )
@@ -299,43 +322,123 @@ fun SettingsApp() {
     }
 }
 
-private fun saveWallpaper(context: Context, uri: Uri): String {
+/** Extensões / caminhos que contam como vídeo no Desktop. */
+internal fun isVideoPath(path: String): Boolean {
+    if (path.isBlank()) return false
+    val p = path.lowercase()
+    return p.endsWith(".mp4") ||
+        p.endsWith(".webm") ||
+        p.endsWith(".mkv") ||
+        p.endsWith(".3gp") ||
+        p.endsWith(".mov") ||
+        p.endsWith(".m4v") ||
+        p.endsWith(".avi") ||
+        p.endsWith(".ts") ||
+        p.endsWith(".m2ts") ||
+        p.endsWith(".flv") ||
+        p.endsWith(".mpeg") ||
+        p.endsWith(".mpg")
+}
+
+/**
+ * Copia o URI para storage interno e devolve path + mensagem de erro.
+ * Detecta o tipo real por MIME, nome e magic bytes (evita .bin → ecrã preto).
+ */
+private fun saveWallpaper(context: Context, uri: Uri): Pair<String?, String> {
     val directory = File(context.filesDir, "wallpapers")
     if (!directory.exists()) directory.mkdirs()
 
-    val mime = context.contentResolver.getType(uri)
+    val mime = context.contentResolver.getType(uri)?.lowercase()
+    val nameHint = (
+        uri.lastPathSegment
+            ?: uri.path
+            ?: ""
+        ).lowercase()
 
-    val extension = when {
-        mime == "image/jpeg" -> ".jpg"
-        mime == "image/png" -> ".png"
-        mime == "image/webp" -> ".webp"
-        mime == "image/gif" -> ".gif"
-        mime == "video/mp4" -> ".mp4"
-        mime == "video/webm" -> ".webm"
-        mime == "video/3gpp" -> ".3gp"
-        mime?.startsWith("video/") == true -> ".mp4"
-        mime?.startsWith("image/") == true -> ".img"
-        else -> {
-            val path = uri.lastPathSegment ?: ""
-            when {
-                path.endsWith(".gif", true) -> ".gif"
-                path.endsWith(".mp4", true) -> ".mp4"
-                path.endsWith(".webm", true) -> ".webm"
-                path.endsWith(".png", true) -> ".png"
-                path.endsWith(".jpg", true) || path.endsWith(".jpeg", true) -> ".jpg"
-                else -> ".bin"
+    // 1) Lê bytes
+    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        ?: return null to "Não foi possível ler o ficheiro"
+
+    if (bytes.isEmpty()) return null to "Ficheiro vazio"
+
+    // 2) Extensão por MIME / nome / magic bytes
+    val extension = resolveExtension(mime, nameHint, bytes)
+
+    val filename = "wallpaper_${System.currentTimeMillis()}$extension"
+    val destination = File(directory, filename)
+    destination.writeBytes(bytes)
+
+    if (!destination.exists() || destination.length() == 0L) {
+        return null to "Falha ao gravar"
+    }
+
+    return destination.absolutePath to ""
+}
+
+private fun resolveExtension(mime: String?, nameHint: String, bytes: ByteArray): String {
+    // MIME
+    when {
+        mime == "image/jpeg" || mime == "image/jpg" -> return ".jpg"
+        mime == "image/png" -> return ".png"
+        mime == "image/webp" -> return ".webp"
+        mime == "image/gif" -> return ".gif"
+        mime == "video/mp4" -> return ".mp4"
+        mime == "video/webm" -> return ".webm"
+        mime == "video/3gpp" || mime == "video/3gpp2" -> return ".3gp"
+        mime == "video/quicktime" -> return ".mov"
+        mime == "video/x-matroska" -> return ".mkv"
+        mime == "video/x-m4v" -> return ".m4v"
+        mime?.startsWith("video/") == true -> return ".mp4"
+        mime?.startsWith("image/") == true -> return ".img"
+    }
+
+    // Nome do ficheiro
+    listOf(
+        ".gif", ".mp4", ".webm", ".mkv", ".3gp", ".mov", ".m4v",
+        ".avi", ".ts", ".m2ts", ".flv", ".mpeg", ".mpg",
+        ".png", ".jpg", ".jpeg", ".webp",
+    ).forEach { ext ->
+        if (nameHint.endsWith(ext)) {
+            return if (ext == ".jpeg") ".jpg" else ext
+        }
+    }
+
+    // Magic bytes
+    if (bytes.size >= 12) {
+        // GIF
+        if (bytes[0] == 'G'.code.toByte() && bytes[1] == 'I'.code.toByte() && bytes[2] == 'F'.code.toByte()) {
+            return ".gif"
+        }
+        // PNG
+        if (bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte() && bytes[2] == 'N'.code.toByte()) {
+            return ".png"
+        }
+        // JPEG
+        if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()) {
+            return ".jpg"
+        }
+        // WebM / Matroska (EBML)
+        if (bytes[0] == 0x1A.toByte() && bytes[1] == 0x45.toByte() &&
+            bytes[2] == 0xDF.toByte() && bytes[3] == 0xA3.toByte()
+        ) {
+            return ".webm"
+        }
+        // MP4 / MOV / M4V — "ftyp" at offset 4
+        if (bytes[4] == 'f'.code.toByte() && bytes[5] == 't'.code.toByte() &&
+            bytes[6] == 'y'.code.toByte() && bytes[7] == 'p'.code.toByte()
+        ) {
+            val brand = String(bytes, 8, minOf(4, bytes.size - 8))
+            return when {
+                brand.startsWith("qt") -> ".mov"
+                else -> ".mp4"
             }
         }
     }
 
-    val filename = "wallpaper_${System.currentTimeMillis()}$extension"
-    val destination = File(directory, filename)
+    // Se o MIME era desconhecido mas o utilizador veio do picker de vídeo, assume mp4
+    if (mime == null || mime == "application/octet-stream") {
+        return ".mp4"
+    }
 
-    context.contentResolver.openInputStream(uri)?.use { input ->
-        destination.outputStream().use { output ->
-            input.copyTo(output)
-        }
-    } ?: throw IllegalStateException("Não foi possível ler o ficheiro")
-
-    return destination.absolutePath
+    return ".mp4"
 }
