@@ -34,10 +34,14 @@ class WindowManager {
         }
     }
 
+    /**
+     * Uma instância por app: se já existe (mesmo minimizada), foca/restaura.
+     * Evita “abrir Files e aparecer Settings” e múltiplas janelas iguais.
+     */
     fun openApp(app: MiniApp, desktopSize: Size): String {
         updateDesktopSize(desktopSize)
 
-        val existing = _windows.firstOrNull { it.app.id == app.id && it.isMinimized }
+        val existing = _windows.firstOrNull { it.app.id == app.id }
         if (existing != null) {
             restore(existing.instanceId)
             return existing.instanceId
@@ -45,7 +49,6 @@ class WindowManager {
 
         val instanceId = UUID.randomUUID().toString()
 
-        // Tamanho inicial: nunca maior que 92% do desktop
         val maxW = (desktopSize.width * 0.92f).coerceAtLeast(MIN_WIDTH)
         val maxH = (desktopSize.height * 0.92f).coerceAtLeast(MIN_HEIGHT)
         val winSize = Size(
@@ -106,7 +109,6 @@ class WindowManager {
                 width = newSize.width.coerceIn(MIN_WIDTH, desktopBounds.width),
                 height = newSize.height.coerceIn(MIN_HEIGHT, desktopBounds.height),
             )
-            // Mantém a janela dentro do desktop após resize
             val pos = clampPosition(window.position, safe)
             window.copy(size = safe, position = pos)
         }
@@ -116,7 +118,9 @@ class WindowManager {
         _windows.replaceInPlace { window ->
             if (window.instanceId == instanceId) {
                 window.copy(isMinimized = true, isFocused = false)
-            } else window
+            } else {
+                window
+            }
         }
     }
 
@@ -172,16 +176,12 @@ class WindowManager {
                     point.y <= window.position.y + window.size.height
             }
 
-    /**
-     * Título da janela (36px) tem de ficar sempre acessível no desktop.
-     * Pelo menos TITLE_GRAB px de barra de título visível.
-     */
     private fun clampPosition(pos: Offset, size: Size): Offset {
         val desk = desktopBounds
         val maxX = (desk.width - TITLE_GRAB).coerceAtLeast(0f)
         val minX = -(size.width - TITLE_GRAB).coerceAtLeast(0f)
         val maxY = (desk.height - TITLE_BAR).coerceAtLeast(0f)
-        val minY = 0f // nunca acima do topo do desktop
+        val minY = 0f
         return Offset(
             x = pos.x.coerceIn(minX, maxX),
             y = pos.y.coerceIn(minY, maxY),

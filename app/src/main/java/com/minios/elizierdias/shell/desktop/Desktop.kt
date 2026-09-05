@@ -121,7 +121,9 @@ fun Desktop() {
                 }
             }
 
+            // Só janelas NÃO minimizadas — evita Settings invisível a capturar cliques/galeria
             windowManager.windows
+                .filter { !it.isMinimized }
                 .sortedBy { it.zIndex }
                 .forEach { window ->
                     key(window.instanceId) {
@@ -190,11 +192,6 @@ fun Desktop() {
     }
 }
 
-/**
- * Wallpaper layer.
- * [wallpaperVersion] muda sempre que o conteúdo muda, mesmo se o path
- * for sempre current.mp4 / current.gif — força recriação do player.
- */
 @Composable
 private fun WallpaperLayer(
     wallpaperUri: String,
