@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -86,10 +87,6 @@ fun Desktop() {
         }
     }
 
-    val isGif = wallpaperUri.endsWith(".gif", ignoreCase = true)
-    val isVideo = isVideoPath(wallpaperUri)
-    val hasCustom = wallpaperUri.isNotBlank()
-
     Column(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
@@ -102,59 +99,11 @@ fun Desktop() {
                     }
                 },
         ) {
-            // Wallpaper — Crop, limitado a este viewport (não atravessa taskbar)
-            Box(Modifier = Modifier.fillMaxSize().clipToBounds()) {
-                when {
-                    isVideo -> {
-                        key(wallpaperUri, wallpaperVideoSound) {
-                            VideoWallpaper(
-                                source = wallpaperUri,
-                                modifier = Modifier.fillMaxSize(),
-                                soundEnabled = wallpaperVideoSound,
-                            )
-                        }
-                    }
-                    isGif -> {
-                        key(wallpaperUri) {
-                            AnimatedWallpaper(
-                                source = wallpaperUri,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
-                    }
-                    hasCustom -> {
-                        key(wallpaperUri) {
-                            val model = remember(wallpaperUri) {
-                                val file = File(wallpaperUri)
-                                if (file.exists()) {
-                                    ImageRequest.Builder(context)
-                                        .data(file)
-                                        .crossfade(true)
-                                        .build()
-                                } else {
-                                    ImageRequest.Builder(context)
-                                        .data(wallpaperUri)
-                                        .crossfade(true)
-                                        .build()
-                                }
-                            }
-                            AsyncImage(
-                                model = model,
-                                contentDescription = "Wallpaper",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                            )
-                        }
-                    }
-                    else -> {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(wallpaper.brush),
-                        )
-                    }
-                }
-            }
+            WallpaperLayer(
+                wallpaperUri = wallpaperUri,
+                gradientBrush = wallpaper.brush,
+                videoSound = wallpaperVideoSound,
+            )
 
             Column(
                 modifier = Modifier
@@ -234,6 +183,62 @@ fun Desktop() {
                         windowManager.restore(id)
                     }
                 },
+            )
+        }
+    }
+}
+
+/** Wallpaper: vídeo / GIF / imagem / gradiente. Sempre Crop + clip. */
+@Composable
+private fun WallpaperLayer(
+    wallpaperUri: String,
+    gradientBrush: Brush,
+    videoSound: Boolean,
+) {
+    val context = LocalContext.current
+    val isGif = wallpaperUri.endsWith(".gif", ignoreCase = true)
+    val isVideo = isVideoPath(wallpaperUri)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clipToBounds(),
+    ) {
+        if (isVideo) {
+            key(wallpaperUri, videoSound) {
+                VideoWallpaper(
+                    source = wallpaperUri,
+                    modifier = Modifier.fillMaxSize(),
+                    soundEnabled = videoSound,
+                )
+            }
+        } else if (isGif) {
+            key(wallpaperUri) {
+                AnimatedWallpaper(
+                    source = wallpaperUri,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        } else if (wallpaperUri.isNotBlank()) {
+            key(wallpaperUri) {
+                val file = File(wallpaperUri)
+                val model = if (file.exists()) {
+                    ImageRequest.Builder(context).data(file).crossfade(true).build()
+                } else {
+                    ImageRequest.Builder(context).data(wallpaperUri).crossfade(true).build()
+                }
+                AsyncImage(
+                    model = model,
+                    contentDescription = "Wallpaper",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(gradientBrush),
             )
         }
     }
