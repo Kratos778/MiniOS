@@ -2,11 +2,12 @@
  * Copyright (c) 2026 Elizier Layerti Gungui Dias
  * MiniOS - Desktop-style environment for Android
  *
+ * PROPRIETARY SOFTWARE — All Rights Reserved.
  * This file is part of MiniOS.
- * Licensed under the MIT License. See LICENSE for details.
+ * See LICENSE and COPYRIGHT.md for full terms.
  *
- * All rights reserved under applicable law (Republic of Angola & international treaties),
- * subject to the terms of the MIT License.
+ * Unauthorized copying, modification, distribution or reuse of this file,
+ * via any medium, is strictly prohibited without prior written permission.
  */
 
 package com.minios.elizierdias.linux

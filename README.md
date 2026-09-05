@@ -7,6 +7,12 @@ Desktop estilo PC num APK Android.
 | **Package** | `com.minios.elizierdias` |
 | **Debug** | `com.minios.elizierdias.debug` |
 | **Versão** | 0.1.0 |
+| **Licença** | **Proprietária — All Rights Reserved** |
+
+> **Aviso legal:** Este projeto é software proprietário.  
+> É proibido copiar, modificar, distribuir, fazer fork ou reutilizar o código
+> sem autorização prévia e por escrito do autor.  
+> Ver ficheiro `LICENSE` e `COPYRIGHT.md`.
 
 ## O que funciona
 
@@ -16,6 +22,7 @@ Desktop estilo PC num APK Android.
 - Taskbar + Start Menu
 - **Files** com acesso ao armazenamento do telefone
 - Terminal, Settings, Software Center
+- Esqueleto do subsistema Linux (em desenvolvimento)
 
 ## Wallpaper de foto
 
@@ -36,4 +43,6 @@ Push na `main` → GitHub Actions → artifact `MiniOS-debug.apk`
 
 ## Licença
 
-MIT
+**Proprietária (All Rights Reserved)**  
+Copyright © 2026 Elizier Layerti Gungui Dias.  
+Ver `LICENSE` e `COPYRIGHT.md` para os termos completos.
