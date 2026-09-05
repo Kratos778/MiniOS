@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -25,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -52,292 +54,143 @@ import com.minios.elizierdias.shell.taskbar.Taskbar
 import com.minios.elizierdias.window.frame.WindowFrame
 import com.minios.elizierdias.window.manager.WindowManager
 
+private val TaskbarHeight = 44.dp
+
 @Composable
 fun Desktop() {
-
     val context = LocalContext.current
+    val config = remember(context) { MiniOSConfig(context) }
+    val windowManager = remember { WindowManager() }
 
-    val config = remember(context) {
-        MiniOSConfig(context)
-    }
-
-    val windowManager = remember {
-        WindowManager()
-    }
-
-    val wallpaperId by config.wallpaperId.collectAsState(
-        initial = "default_gradient",
-    )
-
-    val wallpaperUri by config.wallpaperUri.collectAsState(
-        initial = "",
-    )
-
-    val wallpaperVideoSound by config.wallpaperVideoSound.collectAsState(
-        initial = false,
-    )
-
+    val wallpaperId by config.wallpaperId.collectAsState(initial = "default_gradient")
+    val wallpaperUri by config.wallpaperUri.collectAsState(initial = "")
+    val wallpaperVideoSound by config.wallpaperVideoSound.collectAsState(initial = false)
     val wallpaper = Wallpapers.byId(wallpaperId)
 
-    var startMenuOpen by remember {
-        mutableStateOf(false)
-    }
+    var startMenuOpen by remember { mutableStateOf(false) }
+    var mouseEnabled by remember { mutableStateOf(false) }
+    var desktopSizePx by remember { mutableStateOf(Size(1280f, 676f)) }
 
-    var mouseEnabled by remember {
-        mutableStateOf(false)
-    }
-
-    var desktopSizePx by remember {
-        mutableStateOf(
-            Size(
-                1280f,
-                676f,
-            ),
-        )
+    // Mantém o WindowManager a par da área útil (acima da taskbar)
+    LaunchedEffect(desktopSizePx) {
+        windowManager.updateDesktopSize(desktopSizePx)
     }
 
     fun launchApp(app: MiniApp) {
-
         if (app.id == "smartplay") {
-
-            val intent =
-                context.packageManager
-                    .getLaunchIntentForPackage(
-                        "com.appplayysmartt",
-                    )
-
-            if (intent != null) {
-
-                context.startActivity(intent)
-
-            } else {
-
-                Toast.makeText(
-                    context,
-                    "SmartPlay não está instalado",
-                    Toast.LENGTH_SHORT,
-                ).show()
-            }
-
+            val intent = context.packageManager.getLaunchIntentForPackage("com.appplayysmartt")
+            if (intent != null) context.startActivity(intent)
+            else Toast.makeText(context, "SmartPlay não está instalado", Toast.LENGTH_SHORT).show()
         } else {
-
-            windowManager.openApp(
-                app,
-                desktopSizePx,
-            )
+            windowManager.openApp(app, desktopSizePx)
         }
     }
 
-    val isGifWallpaper =
-        wallpaperUri.endsWith(
-            ".gif",
-            ignoreCase = true,
-        )
-
+    val isGifWallpaper = wallpaperUri.endsWith(".gif", ignoreCase = true)
     val isVideoWallpaper = isVideoPath(wallpaperUri)
 
-    Column(
-        modifier = Modifier.fillMaxSize(),
-    ) {
-
+    Column(modifier = Modifier.fillMaxSize()) {
+        //
+        // VIEWPORT RÍGIDO DO WALLPAPER + ÍCONES + JANELAS
+        // clipToBounds: vídeo/GIF/imagem NUNCA atravessam a taskbar
+        //
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .clipToBounds()
                 .onSizeChanged { size ->
-
-                    desktopSizePx = Size(
-                        size.width.toFloat(),
-                        size.height.toFloat(),
-                    )
+                    desktopSizePx = Size(size.width.toFloat(), size.height.toFloat())
                 },
         ) {
-
-            when {
-
-                isGifWallpaper -> {
-
-                    AnimatedWallpaper(
-                        source = wallpaperUri,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-
-                isVideoWallpaper -> {
-
-                    // key força recriar o player ao mudar de vídeo → vídeo
-                    key(wallpaperUri, wallpaperVideoSound) {
-
-                        VideoWallpaper(
+            // Camada wallpaper — preenchimento Crop, limitada a este Box
+            Box(Modifier = Modifier.fillMaxSize().clipToBounds()) {
+                when {
+                    isGifWallpaper -> {
+                        AnimatedWallpaper(
                             source = wallpaperUri,
                             modifier = Modifier.fillMaxSize(),
-                            soundEnabled = wallpaperVideoSound,
+                        )
+                    }
+                    isVideoWallpaper -> {
+                        key(wallpaperUri, wallpaperVideoSound) {
+                            VideoWallpaper(
+                                source = wallpaperUri,
+                                modifier = Modifier.fillMaxSize(),
+                                soundEnabled = wallpaperVideoSound,
+                            )
+                        }
+                    }
+                    wallpaperUri.isNotBlank() -> {
+                        Image(
+                            painter = rememberAsyncImagePainter(model = wallpaperUri),
+                            contentDescription = "Wallpaper",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                    else -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(wallpaper.brush),
                         )
                     }
                 }
-
-                wallpaperUri.isNotBlank() -> {
-
-                    Image(
-                        painter = rememberAsyncImagePainter(
-                            model = wallpaperUri,
-                        ),
-                        contentDescription = "Wallpaper",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                    )
-                }
-
-                else -> {
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                wallpaper.brush,
-                            ),
-                    )
-                }
             }
 
+            // Ícones
             Column(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(16.dp),
-
-                verticalArrangement =
-                Arrangement.spacedBy(18.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-
                 AppRegistry.all.forEach { app ->
-
-                    DesktopIcon(
-                        app = app,
-
-                        onOpen = {
-
-                            startMenuOpen = false
-
-                            launchApp(app)
-                        },
-                    )
+                    DesktopIcon(app = app, onOpen = {
+                        startMenuOpen = false
+                        launchApp(app)
+                    })
                 }
             }
 
+            // Janelas (já limitadas pelo WindowManager à área deste Box)
             windowManager.windows
-                .sortedBy {
-                    it.zIndex
-                }
+                .sortedBy { it.zIndex }
                 .forEach { window ->
-
                     key(window.instanceId) {
-
                         WindowFrame(
                             window = window,
-
-                            onFocus = {
-
-                                windowManager.focus(
-                                    window.instanceId,
-                                )
-                            },
-
-                            onMove = { position ->
-
-                                windowManager.move(
-                                    window.instanceId,
-                                    position,
-                                )
-                            },
-
-                            onResize = { size ->
-
-                                windowManager.resize(
-                                    window.instanceId,
-                                    size,
-                                )
-                            },
-
-                            onClose = {
-
-                                windowManager.close(
-                                    window.instanceId,
-                                )
-                            },
-
-                            onMinimize = {
-
-                                windowManager.minimize(
-                                    window.instanceId,
-                                )
-                            },
-
+                            onFocus = { windowManager.focus(window.instanceId) },
+                            onMove = { pos -> windowManager.move(window.instanceId, pos) },
+                            onResize = { size -> windowManager.resize(window.instanceId, size) },
+                            onClose = { windowManager.close(window.instanceId) },
+                            onMinimize = { windowManager.minimize(window.instanceId) },
                             onToggleMaximize = {
-
-                                windowManager.toggleMaximize(
-                                    window.instanceId,
-                                    desktopSizePx,
-                                )
+                                windowManager.toggleMaximize(window.instanceId, desktopSizePx)
                             },
                         ) {
-
                             when (window.app.id) {
-
-                                "files" -> {
-                                    FilesApp()
-                                }
-
-                                "terminal" -> {
-                                    TerminalApp()
-                                }
-
-                                "settings" -> {
-                                    SettingsApp()
-                                }
-
-                                "software_center" -> {
-                                    SoftwareCenterApp()
-                                }
-
-                                "browser" -> {
-                                    BrowserApp()
-                                }
-
-                                "media_player" -> {
-                                    MediaPlayerOS()
-                                }
-
-                                else -> {
-
-                                    Text(
-                                        text =
-                                        "App: ${window.app.id}",
-
-                                        color =
-                                        Color.White,
-                                    )
-                                }
+                                "files" -> FilesApp()
+                                "terminal" -> TerminalApp()
+                                "settings" -> SettingsApp()
+                                "software_center" -> SoftwareCenterApp()
+                                "browser" -> BrowserApp()
+                                "media_player" -> MediaPlayerOS()
+                                else -> Text("App: ${window.app.id}", color = Color.White)
                             }
                         }
                     }
                 }
 
             if (startMenuOpen) {
-
                 StartMenu(
-
                     apps = AppRegistry.all,
-
                     onAppClick = { app ->
-
                         startMenuOpen = false
-
                         launchApp(app)
                     },
-
-                    onDismiss = {
-                        startMenuOpen = false
-                    },
+                    onDismiss = { startMenuOpen = false },
                 )
             }
 
@@ -347,47 +200,23 @@ fun Desktop() {
             )
         }
 
+        // Taskbar fixa — fora do viewport do wallpaper
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(44.dp),
+                .height(TaskbarHeight),
         ) {
-
             Taskbar(
-
-                openWindows =
-                windowManager.windows,
-
-                mouseEnabled =
-                mouseEnabled,
-
-                onMouseToggle = { enabled ->
-                    mouseEnabled = enabled
-                },
-
-                onStartClick = {
-                    startMenuOpen =
-                        !startMenuOpen
-                },
-
+                openWindows = windowManager.windows,
+                mouseEnabled = mouseEnabled,
+                onMouseToggle = { mouseEnabled = it },
+                onStartClick = { startMenuOpen = !startMenuOpen },
                 onWindowClick = { id ->
-
-                    val window =
-                        windowManager.windows
-                            .firstOrNull {
-                                it.instanceId == id
-                            }
-                            ?: return@Taskbar
-
-                    if (
-                        window.isFocused &&
-                        !window.isMinimized
-                    ) {
-
+                    val window = windowManager.windows.firstOrNull { it.instanceId == id }
+                        ?: return@Taskbar
+                    if (window.isFocused && !window.isMinimized) {
                         windowManager.minimize(id)
-
                     } else {
-
                         windowManager.restore(id)
                     }
                 },
@@ -397,50 +226,20 @@ fun Desktop() {
 }
 
 @Composable
-private fun DesktopIcon(
-    app: MiniApp,
-    onOpen: () -> Unit,
-) {
-
+private fun DesktopIcon(app: MiniApp, onOpen: () -> Unit) {
     Column(
         modifier = Modifier
             .width(72.dp)
-            .clickable {
-                onOpen()
-            },
-
-        horizontalAlignment =
-        Alignment.CenterHorizontally,
+            .clickable { onOpen() },
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-
         Icon(
-            imageVector =
-            app.icon,
-
-            contentDescription =
-            app.title,
-
-            tint =
-            Color.White,
-
-            modifier =
-            Modifier.size(30.dp),
+            imageVector = app.icon,
+            contentDescription = app.title,
+            tint = Color.White,
+            modifier = Modifier.size(30.dp),
         )
-
-        Spacer(
-            modifier =
-            Modifier.height(4.dp),
-        )
-
-        Text(
-            text =
-            app.title,
-
-            color =
-            Color.White,
-
-            fontSize =
-            11.sp,
-        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(text = app.title, color = Color.White, fontSize = 11.sp)
     }
 }
