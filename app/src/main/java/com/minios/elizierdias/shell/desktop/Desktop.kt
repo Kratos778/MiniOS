@@ -1,7 +1,6 @@
 package com.minios.elizierdias.shell.desktop
 
 import android.widget.Toast
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.minios.elizierdias.apps.AppRegistry
 import com.minios.elizierdias.apps.browser.BrowserApp
 import com.minios.elizierdias.apps.files.FilesApp
@@ -45,6 +45,7 @@ import com.minios.elizierdias.apps.softwarecenter.SoftwareCenterApp
 import com.minios.elizierdias.apps.terminal.TerminalApp
 import com.minios.elizierdias.core.MiniApp
 import com.minios.elizierdias.core.MiniOSConfig
+import com.minios.elizierdias.personalization.AnimatedWallpaper
 import com.minios.elizierdias.personalization.VideoWallpaper
 import com.minios.elizierdias.personalization.Wallpapers
 import com.minios.elizierdias.shell.mouse.VirtualMouse
@@ -85,24 +86,11 @@ fun Desktop() {
         }
     }
 
-    val isGifWallpaper = wallpaperUri.endsWith(".gif", ignoreCase = true)
-    val isVideoWallpaper = isVideoPath(wallpaperUri)
-
-    // Modelo Coil: path local → File, senão string URI
-    val wallpaperModel: Any? = remember(wallpaperUri) {
-        when {
-            wallpaperUri.isBlank() -> null
-            wallpaperUri.startsWith("/") -> File(wallpaperUri)
-            else -> wallpaperUri
-        }
-    }
+    val isGif = wallpaperUri.endsWith(".gif", ignoreCase = true)
+    val isVideo = isVideoPath(wallpaperUri)
+    val hasCustom = wallpaperUri.isNotBlank()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        /*
-         * VIEWPORT RÍGIDO — wallpaper + ícones + janelas
-         * clipToBounds: nada ultrapassa para a taskbar
-         * ContentScale.Crop / ZOOM: preenche sem barras, corta excesso, centrado
-         */
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -114,10 +102,10 @@ fun Desktop() {
                     }
                 },
         ) {
-            // Wallpaper layer (sempre Crop)
-            Box(Modifier.fillMaxSize().clipToBounds()) {
+            // Wallpaper — Crop, limitado a este viewport (não atravessa taskbar)
+            Box(Modifier = Modifier.fillMaxSize().clipToBounds()) {
                 when {
-                    isVideoWallpaper -> {
+                    isVideo -> {
                         key(wallpaperUri, wallpaperVideoSound) {
                             VideoWallpaper(
                                 source = wallpaperUri,
@@ -126,14 +114,37 @@ fun Desktop() {
                             )
                         }
                     }
-                    wallpaperModel != null -> {
-                        // JPG/PNG/WebP/GIF via Coil — Crop + GIF animado nativo
-                        AsyncImage(
-                            model = wallpaperModel,
-                            contentDescription = "Wallpaper",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                        )
+                    isGif -> {
+                        key(wallpaperUri) {
+                            AnimatedWallpaper(
+                                source = wallpaperUri,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                    hasCustom -> {
+                        key(wallpaperUri) {
+                            val model = remember(wallpaperUri) {
+                                val file = File(wallpaperUri)
+                                if (file.exists()) {
+                                    ImageRequest.Builder(context)
+                                        .data(file)
+                                        .crossfade(true)
+                                        .build()
+                                } else {
+                                    ImageRequest.Builder(context)
+                                        .data(wallpaperUri)
+                                        .crossfade(true)
+                                        .build()
+                                }
+                            }
+                            AsyncImage(
+                                model = model,
+                                contentDescription = "Wallpaper",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
                     }
                     else -> {
                         Box(
