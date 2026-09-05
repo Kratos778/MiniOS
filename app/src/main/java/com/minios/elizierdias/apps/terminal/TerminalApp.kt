@@ -13,8 +13,6 @@
 package com.minios.elizierdias.apps.terminal
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
@@ -41,12 +38,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -56,11 +51,15 @@ import com.minios.elizierdias.linux.LinuxRootFs
 import com.minios.elizierdias.linux.LinuxSession
 import kotlinx.coroutines.launch
 
-enum class TerminalMode {
-    MINIOS,
-    LINUX,
-}
-
+/**
+ * Terminal Linux only — abre pelo ícone do Desktop.
+ *
+ * Fluxo:
+ *   install        → descarrega + extrai Debian ARM64
+ *   setup-runtime  → descarrega PRoot
+ *   setup-storage  → monta /sdcard (estilo Termux, sem root)
+ *   depois: ls, cd, uname, apt, unzip… via PRoot
+ */
 @Composable
 fun TerminalApp() {
     val context = LocalContext.current
@@ -73,47 +72,16 @@ fun TerminalApp() {
     val isReady by linuxManager.isReady.collectAsState()
     val installProgress by linuxManager.installProgress.collectAsState()
 
-    var mode by remember { mutableStateOf(TerminalMode.LINUX) }
     var input by remember { mutableStateOf("") }
-    var linuxSession by remember { mutableStateOf<LinuxSession?>(null) }
-    var installing by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var session by remember { mutableStateOf<LinuxSession?>(null) }
 
     val lines = remember {
         mutableStateListOf(
-            "MiniOS Terminal — dual mode",
-            "Toque em [Linux] ou [MiniOS] para alternar.",
+            "MiniOS Linux Terminal",
+            "Debian ARM64 via PRoot (sem root)",
             "",
         )
-    }
-
-    LaunchedEffect(Unit) {
-        linuxManager.initialize()
-        val status = linuxManager.getRootFs().status()
-        lines.add("── Linux subsystem ──")
-        lines.add(statusMessage)
-        lines.add("RootFS path: ${status.rootfsPath}")
-        lines.add(
-            if (status.isInstalled) {
-                "RootFS: instalado (${status.distro ?: "?"}) · ${LinuxRootFs.formatSize(status.estimatedSizeBytes)}"
-            } else {
-                "RootFS: NÃO instalado — escreve: install"
-            },
-        )
-        lines.add("Runtime nativo: não ligado ainda")
-        lines.add("")
-        lines.add("Modo: Linux Shell")
-        lines.add("Comandos: help | status | install | clear | uname | whoami")
-        lines.add("")
-        listState.animateScrollToItem((lines.size - 1).coerceAtLeast(0))
-    }
-
-    // Mostra progresso da instalação em tempo real
-    LaunchedEffect(installProgress) {
-        val msg = installProgress ?: return@LaunchedEffect
-        if (lines.lastOrNull() != msg) {
-            lines.add(msg)
-            listState.animateScrollToItem((lines.size - 1).coerceAtLeast(0))
-        }
     }
 
     fun scrollToBottom() {
@@ -122,67 +90,70 @@ fun TerminalApp() {
         }
     }
 
-    fun switchMode(newMode: TerminalMode) {
-        mode = newMode
-        lines.add("")
+    LaunchedEffect(Unit) {
+        linuxManager.initialize()
+        val status = linuxManager.getRootFs().status()
+        val rt = linuxManager.getRuntime()
+        lines.add("── estado ──")
+        lines.add(statusMessage)
+        lines.add("rootfs : ${status.rootfsPath}")
         lines.add(
-            if (newMode == TerminalMode.LINUX) {
-                "── Mudou para Linux Shell ──"
-            } else {
-                "── Mudou para MiniOS Shell ──"
-            },
+            "installed: ${status.isInstalled} " +
+                "(${status.distro ?: "—"}) " +
+                LinuxRootFs.formatSize(status.estimatedSizeBytes),
         )
+        lines.add("proot  : ${if (rt.isProotInstalled()) "ok" else "em falta"}")
+        lines.add("storage: ${if (rt.isStorageReady()) "ok" else "corre setup-storage"}")
         lines.add("")
-        scrollToBottom()
-    }
-
-    fun runMiniOs(cmd: String) {
-        lines.add("guest@minios:~$ $cmd")
-        val out = when {
-            cmd.isBlank() -> ""
-            cmd == "help" -> "help | echo <t> | whoami | uname | clear | status | linux"
-            cmd == "whoami" -> "guest"
-            cmd == "uname" -> "MiniOS Shell 0.1.0"
-            cmd == "status" -> statusMessage
-            cmd == "linux" -> {
-                switchMode(TerminalMode.LINUX)
-                ""
-            }
-            cmd == "clear" -> {
-                lines.clear()
-                ""
-            }
-            cmd.startsWith("echo ") -> cmd.removePrefix("echo ")
-            else -> "comando nao reconhecido: $cmd (modo MiniOS)"
+        if (!status.isInstalled) {
+            lines.add("1) install")
+            lines.add("2) setup-runtime")
+            lines.add("3) setup-storage")
+        } else if (!rt.isProotInstalled()) {
+            lines.add("Próximo: setup-runtime")
+        } else {
+            lines.add("Linux pronto. Exemplos: uname -a | ls / | whoami")
+            session = linuxManager.startSession()
         }
-        if (out.isNotEmpty()) lines.add(out)
         lines.add("")
         scrollToBottom()
     }
 
-    fun runLinux(cmd: String) {
-        val prompt = "root@minios-linux:~# "
-        lines.add("$prompt$cmd")
+    LaunchedEffect(installProgress) {
+        val msg = installProgress ?: return@LaunchedEffect
+        if (lines.lastOrNull() != msg) {
+            lines.add(msg)
+            scrollToBottom()
+        }
+    }
 
-        when {
-            cmd.isBlank() -> lines.add("")
-            cmd == "help" -> {
-                lines.add("Linux Shell (integrado ao MiniOS)")
-                lines.add("  help     — esta ajuda")
-                lines.add("  status   — estado do RootFS / runtime")
-                lines.add("  install  — descarregar + extrair Debian ARM64")
-                lines.add("  uname    — info do sistema")
-                lines.add("  whoami   — utilizador")
-                lines.add("  clear    — limpar ecrã")
-                lines.add("  minios   — voltar ao MiniOS Shell")
+    fun runBuiltin(cmd: String): Boolean {
+        when (cmd) {
+            "help" -> {
+                lines.add("Comandos MiniOS Linux:")
+                lines.add("  help           — ajuda")
+                lines.add("  status         — estado RootFS/PRoot/storage")
+                lines.add("  install        — Debian ARM64 (download+extract)")
+                lines.add("  setup-runtime  — descarregar PRoot")
+                lines.add("  setup-storage  — /sdcard, Download, DCIM…")
+                lines.add("  clear          — limpar")
                 lines.add("")
-                lines.add("Nota: depois de 'install', o próximo passo é ligar o runtime (PRoot).")
+                lines.add("Depois de install + setup-runtime, comandos Linux reais:")
+                lines.add("  uname -a | ls / | cat /etc/os-release | pwd")
+                lines.add("  cd /sdcard/Download && ls")
+                lines.add("  apt update   (quando rede/DNS estiverem ok no rootfs)")
                 lines.add("")
+                return true
             }
-            cmd == "status" -> {
+            "clear" -> {
+                lines.clear()
+                return true
+            }
+            "status" -> {
                 scope.launch {
                     linuxManager.refreshRootFsStatus()
                     val s = linuxManager.rootFsStatus.value
+                    val rt = linuxManager.getRuntime()
                     lines.add(statusMessage)
                     lines.add("enabled : ${LinuxConfig.enabled}")
                     lines.add("ready   : $isReady")
@@ -191,76 +162,102 @@ fun TerminalApp() {
                         lines.add("installed: ${s.isInstalled} (${s.distro ?: "—"})")
                         lines.add("size    : ${LinuxRootFs.formatSize(s.estimatedSizeBytes)}")
                     }
+                    lines.add("proot   : ${if (rt.isProotInstalled()) "ok" else "no"}")
+                    lines.add("storage : ${if (rt.isStorageReady()) "ok" else "no"}")
                     lines.add("")
                     scrollToBottom()
                 }
+                return true
             }
-            cmd == "install" -> {
-                if (installing) {
-                    lines.add("Instalação já em curso...")
-                    lines.add("")
-                    scrollToBottom()
-                    return
+            "install" -> {
+                if (busy) {
+                    lines.add("ocupado...")
+                    return true
                 }
                 if (rootFsStatus?.isInstalled == true) {
-                    lines.add("RootFS já está instalado (${rootFsStatus?.distro}).")
+                    lines.add("RootFS já instalado.")
+                    lines.add("")
+                    return true
+                }
+                busy = true
+                scope.launch {
+                    val r = linuxManager.installRootFs()
+                    busy = false
+                    lines.add(if (r.isSuccess) "✓ install OK — agora: setup-runtime" else "✗ ${r.exceptionOrNull()?.message}")
                     lines.add("")
                     scrollToBottom()
-                    return
                 }
-                installing = true
-                lines.add("A iniciar download + extração do Debian bookworm ARM64...")
-                lines.add("Isto pode demorar vários minutos (rede + unzip).")
-                lines.add("")
-                scrollToBottom()
+                return true
+            }
+            "setup-runtime" -> {
+                if (busy) {
+                    lines.add("ocupado...")
+                    return true
+                }
+                busy = true
                 scope.launch {
-                    val result = linuxManager.installRootFs()
-                    installing = false
-                    if (result.isSuccess) {
-                        lines.add("")
-                        lines.add("✓ RootFS instalado com sucesso.")
-                        lines.add("Corre 'status' para confirmar.")
-                        lines.add("Próximo passo: ligar o runtime (PRoot).")
+                    val r = linuxManager.setupRuntime()
+                    busy = false
+                    if (r.isSuccess) {
+                        lines.add("✓ PRoot OK")
+                        session = linuxManager.startSession()
+                        lines.add("Sessão Linux ativa.")
                     } else {
-                        lines.add("")
-                        lines.add("✗ Falha: ${result.exceptionOrNull()?.message}")
+                        lines.add("✗ ${r.exceptionOrNull()?.message}")
                     }
                     lines.add("")
                     scrollToBottom()
                 }
+                return true
             }
-            cmd == "whoami" -> {
-                lines.add("root")
-                lines.add("")
-            }
-            cmd == "uname" || cmd == "uname -a" -> {
-                lines.add("Linux MiniOS 0.1.0 aarch64 (runtime pending)")
-                lines.add("")
-            }
-            cmd == "clear" -> lines.clear()
-            cmd == "minios" -> switchMode(TerminalMode.MINIOS)
-            else -> {
-                val session = linuxSession ?: linuxManager.startSession()
-                if (session != null) {
-                    linuxSession = session
-                    session.execute(cmd)
-                    lines.add("[Linux runtime not connected yet – command ignored]")
-                    lines.add("")
-                } else {
-                    lines.add("bash: $cmd: runtime Linux ainda não está ligado")
-                    lines.add("1) Corre 'install' se o RootFS ainda não estiver instalado")
-                    lines.add("2) Depois liga-se o runtime (PRoot) na próxima etapa")
-                    lines.add("")
+            "setup-storage" -> {
+                if (busy) {
+                    lines.add("ocupado...")
+                    return true
                 }
+                busy = true
+                scope.launch {
+                    val r = linuxManager.setupStorage()
+                    busy = false
+                    lines.add(
+                        if (r.isSuccess) {
+                            "✓ storage OK — tenta: ls /sdcard"
+                        } else {
+                            "✗ ${r.exceptionOrNull()?.message}"
+                        },
+                    )
+                    lines.add("")
+                    scrollToBottom()
+                }
+                return true
             }
         }
-        scrollToBottom()
+        return false
     }
 
     fun run(cmd: String) {
-        when (mode) {
-            TerminalMode.MINIOS -> runMiniOs(cmd)
-            TerminalMode.LINUX -> runLinux(cmd)
+        lines.add("root@minios-linux:~# $cmd")
+        if (cmd.isBlank()) {
+            lines.add("")
+            scrollToBottom()
+            return
+        }
+        if (runBuiltin(cmd)) {
+            scrollToBottom()
+            return
+        }
+
+        // Comando real via PRoot
+        val s = session ?: linuxManager.startSession().also { session = it }
+        busy = true
+        scope.launch {
+            val out = s.execute(cmd)
+            busy = false
+            if (out.isNotBlank()) {
+                out.lines().forEach { lines.add(it) }
+            }
+            lines.add("")
+            scrollToBottom()
         }
     }
 
@@ -273,32 +270,26 @@ fun TerminalApp() {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ModeChip(
-                label = "Linux",
-                selected = mode == TerminalMode.LINUX,
-                onClick = { switchMode(TerminalMode.LINUX) },
-            )
-            ModeChip(
-                label = "MiniOS",
-                selected = mode == TerminalMode.MINIOS,
-                onClick = { switchMode(TerminalMode.MINIOS) },
+            Text(
+                text = "Linux",
+                color = Color(0xFF3FB950),
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
             )
             Spacer(modifier = Modifier.weight(1f))
             Text(
                 text = when {
-                    installing -> "installing..."
-                    isReady -> "runtime: on"
-                    rootFsStatus?.isInstalled == true -> "rootfs: ok"
-                    else -> "runtime: off"
+                    busy -> "busy"
+                    isReady -> "ready"
+                    rootFsStatus?.isInstalled == true -> "rootfs ok"
+                    else -> "setup needed"
                 },
                 color = when {
-                    installing -> Color(0xFFD29922)
+                    busy -> Color(0xFFD29922)
                     isReady -> Color(0xFF3FB950)
-                    rootFsStatus?.isInstalled == true -> Color(0xFF58A6FF)
                     else -> Color(0xFF8B949E)
                 },
                 fontSize = 11.sp,
@@ -324,7 +315,7 @@ fun TerminalApp() {
             value = input,
             onValueChange = { input = it },
             modifier = Modifier.fillMaxWidth(),
-            enabled = !installing,
+            enabled = !busy,
             textStyle = TextStyle(
                 fontFamily = FontFamily.Monospace,
                 fontSize = 13.sp,
@@ -340,7 +331,7 @@ fun TerminalApp() {
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(
                 onSend = {
-                    if (installing) return@KeyboardActions
+                    if (busy) return@KeyboardActions
                     val cmd = input.trim()
                     input = ""
                     run(cmd)
@@ -348,11 +339,7 @@ fun TerminalApp() {
             ),
             placeholder = {
                 Text(
-                    text = if (mode == TerminalMode.LINUX) {
-                        "root@minios-linux:~#"
-                    } else {
-                        "guest@minios:~$"
-                    },
+                    text = "root@minios-linux:~#",
                     color = Color(0xFF484F58),
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
@@ -360,26 +347,4 @@ fun TerminalApp() {
             },
         )
     }
-}
-
-@Composable
-private fun ModeChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val bg = if (selected) Color(0xFF238636) else Color(0xFF21262D)
-    val fg = if (selected) Color.White else Color(0xFFC9D1D9)
-    Text(
-        text = label,
-        color = fg,
-        fontSize = 12.sp,
-        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-        fontFamily = FontFamily.Monospace,
-        modifier = Modifier
-            .clip(RoundedCornerShape(6.dp))
-            .background(bg)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-    )
 }

@@ -12,17 +12,18 @@
 
 package com.minios.elizierdias.linux
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 
 /**
- * Represents an active Linux shell / session inside the MiniOS Linux runtime.
- *
- * Future: will hold file descriptors, PTY, environment variables and the
- * underlying LinuxProcess that runs /bin/bash (or /bin/sh).
+ * Linux shell session. Commands are executed through [LinuxRuntime] (PRoot).
  */
-class LinuxSession {
+class LinuxSession(
+    private val runtime: LinuxRuntime,
+) {
 
     private val _isAlive = MutableStateFlow(true)
     val isAlive: StateFlow<Boolean> = _isAlive.asStateFlow()
@@ -30,16 +31,35 @@ class LinuxSession {
     private val _output = MutableStateFlow<List<String>>(emptyList())
     val output: StateFlow<List<String>> = _output.asStateFlow()
 
-    /**
-     * Execute a command in the current session.
-     * Skeleton implementation – just records the command.
-     */
-    fun execute(command: String) {
-        if (!_isAlive.value) return
-        val newLines = _output.value.toMutableList()
-        newLines.add("$ $command")
-        newLines.add("[Linux runtime not connected yet – command ignored]")
-        _output.value = newLines
+    suspend fun execute(command: String): String = withContext(Dispatchers.IO) {
+        if (!_isAlive.value) return@withContext ""
+
+        val result = runtime.exec(command)
+        val lines = mutableListOf<String>()
+
+        if (result.isFailure) {
+            val msg = result.exceptionOrNull()?.message ?: "unknown error"
+            lines.add("error: $msg")
+            appendOutput(lines)
+            return@withContext lines.joinToString("\n")
+        }
+
+        val exec = result.getOrThrow()
+        if (exec.stdout.isNotBlank()) {
+            exec.stdout.lines().forEach { lines.add(it) }
+        }
+        if (exec.stderr.isNotBlank()) {
+            exec.stderr.lines().forEach { lines.add(it) }
+        }
+        if (exec.exitCode != 0 && lines.isEmpty()) {
+            lines.add("[exit ${exec.exitCode}]")
+        }
+        appendOutput(lines)
+        lines.joinToString("\n")
+    }
+
+    private fun appendOutput(newLines: List<String>) {
+        _output.value = _output.value + newLines
     }
 
     fun clearOutput() {
@@ -48,6 +68,5 @@ class LinuxSession {
 
     fun close() {
         _isAlive.value = false
-        // TODO: kill underlying process / close PTY
     }
 }
