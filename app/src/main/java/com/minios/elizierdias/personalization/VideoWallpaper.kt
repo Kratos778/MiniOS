@@ -9,6 +9,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
@@ -20,8 +21,10 @@ import androidx.media3.ui.PlayerView
 import java.io.File
 
 /**
- * Wallpaper de vídeo em loop (ContentScale.Crop via RESIZE_MODE_ZOOM).
- * Buffers pequenos — wallpapers curtos em loop não precisam de fila grande.
+ * Wallpaper de vídeo em loop.
+ * RESIZE_MODE_ZOOM = Crop (preenche, corta excesso, sem barras).
+ * Buffers mínimos — evita OOM com ficheiros grandes.
+ * O parent Desktop já faz clipToBounds acima da taskbar.
  */
 @Composable
 fun VideoWallpaper(
@@ -45,11 +48,12 @@ fun VideoWallpaper(
     val player = remember(source) {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 1_000,
-                /* maxBufferMs = */ 3_000,
-                /* bufferForPlaybackMs = */ 500,
-                /* bufferForPlaybackAfterRebufferMs = */ 1_000,
+                /* minBufferMs */ 500,
+                /* maxBufferMs */ 1_500,
+                /* bufferForPlaybackMs */ 250,
+                /* bufferForPlaybackAfterRebufferMs */ 500,
             )
+            .setTargetBufferBytes(2 * 1024 * 1024) // max ~2MB em buffer
             .build()
 
         ExoPlayer.Builder(context)
@@ -73,19 +77,15 @@ fun VideoWallpaper(
 
     DisposableEffect(source) {
         onDispose {
-            try {
-                player.stop()
-            } catch (_: Exception) {
-            }
-            try {
-                player.release()
-            } catch (_: Exception) {
-            }
+            try { player.stop() } catch (_: Exception) {}
+            try { player.release() } catch (_: Exception) {}
         }
     }
 
     AndroidView(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .clipToBounds(),
         factory = { ctx ->
             PlayerView(ctx).apply {
                 layoutParams = FrameLayout.LayoutParams(
@@ -93,6 +93,7 @@ fun VideoWallpaper(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 useController = false
+                // Crop: preenche o viewport, corta o excesso (como ContentScale.Crop)
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 this.player = player
                 setBackgroundColor(0xFF0D1117.toInt())
@@ -100,9 +101,7 @@ fun VideoWallpaper(
             }
         },
         update = { view ->
-            if (view.player !== player) {
-                view.player = player
-            }
+            if (view.player !== player) view.player = player
             try {
                 player.volume = if (soundEnabled) 1f else 0f
             } catch (_: Exception) {
