@@ -24,6 +24,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -54,6 +58,9 @@ fun WindowFrame(
     val windowWidth = with(density) { window.size.width.toDp() }
     val windowHeight = with(density) { window.size.height.toDp() }
 
+    // Acumula o drag localmente — evita posição stale na closure
+    var dragPos by remember(window.instanceId) { mutableStateOf(window.position) }
+
     val frameModifier =
         if (window.isMinimized) {
             Modifier
@@ -77,7 +84,6 @@ fun WindowFrame(
             .background(Color(0xFF161B22)),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Barra de título: arrastar em qualquer zona vazia (ícone + título)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -85,10 +91,14 @@ fun WindowFrame(
                     .background(if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128))
                     .pointerInput(window.instanceId) {
                         detectDragGestures(
-                            onDragStart = { onFocus() },
+                            onDragStart = {
+                                onFocus()
+                                dragPos = window.position
+                            },
                         ) { change, dragAmount ->
                             change.consume()
-                            onMove(window.position + dragAmount)
+                            dragPos += dragAmount
+                            onMove(dragPos)
                         }
                     }
                     .padding(horizontal = 8.dp),
@@ -126,19 +136,21 @@ fun WindowFrame(
         }
 
         if (!window.isMinimized) {
+            var resizeSize by remember(window.instanceId) { mutableStateOf(window.size) }
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .size(20.dp)
                     .pointerInput(window.instanceId) {
-                        detectDragGestures { change, dragAmount ->
+                        detectDragGestures(
+                            onDragStart = { resizeSize = window.size },
+                        ) { change, dragAmount ->
                             change.consume()
-                            onResize(
-                                Size(
-                                    width = window.size.width + dragAmount.x,
-                                    height = window.size.height + dragAmount.y,
-                                ),
+                            resizeSize = Size(
+                                width = (resizeSize.width + dragAmount.x).coerceAtLeast(280f),
+                                height = (resizeSize.height + dragAmount.y).coerceAtLeast(200f),
                             )
+                            onResize(resizeSize)
                         }
                     },
             )
