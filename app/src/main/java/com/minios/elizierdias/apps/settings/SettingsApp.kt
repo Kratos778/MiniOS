@@ -57,6 +57,8 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
 import com.minios.elizierdias.core.MiniOSConfig
 import com.minios.elizierdias.core.PowerMode
+import com.minios.elizierdias.core.purgeWallpaperFiles
+import com.minios.elizierdias.core.wallpaperStorageDir
 import com.minios.elizierdias.personalization.Wallpapers
 import com.minios.elizierdias.ui.components.PcScrollVerticalScrollbar
 import java.io.File
@@ -107,7 +109,7 @@ fun SettingsApp() {
                     savedPath.endsWith(".gif", true) -> "GIF"
                     else -> "imagem"
                 }
-                statusMsg = "Wallpaper $kind ativo"
+                statusMsg = "Wallpaper $kind ativo (ficheiro único)"
             } else {
                 statusMsg = "Erro: ${result.second}"
             }
@@ -116,7 +118,10 @@ fun SettingsApp() {
 
     fun takePersist(uri: Uri) {
         try {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
         } catch (_: Exception) {
         }
     }
@@ -154,14 +159,21 @@ fun SettingsApp() {
 
     Row(modifier = Modifier.fillMaxSize().background(Color(0xFF0D1117))) {
         Column(
-            modifier = Modifier.weight(1f).fillMaxHeight().verticalScroll(scrollState).padding(16.dp),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .verticalScroll(scrollState)
+                .padding(16.dp),
         ) {
             Text("Wallpaper", color = Color(0xFFC9D1D9), fontSize = 14.sp)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Wallpapers.all.forEach { wp ->
                     Box(
-                        modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(wp.previewColor)
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(wp.previewColor)
                             .clickable {
                                 scope.launch {
                                     config.setWallpaper(wp.id)
@@ -177,16 +189,24 @@ fun SettingsApp() {
                 }
             }
             Spacer(Modifier.height(12.dp))
-            Button(onClick = { statusMsg = ""; pickImage.launch("image/*") }) {
+            Button(onClick = {
+                statusMsg = ""
+                pickImage.launch("image/*")
+            }) {
                 Text("Escolher foto / GIF da galeria")
             }
             Spacer(Modifier.height(8.dp))
             Button(onClick = {
                 statusMsg = ""
-                pickVideoPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                pickVideoPhoto.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly),
+                )
             }) { Text("Escolher vídeo da galeria") }
             Spacer(Modifier.height(6.dp))
-            OutlinedButton(onClick = { statusMsg = ""; pickVideoClassic.launch("video/*") }) {
+            OutlinedButton(onClick = {
+                statusMsg = ""
+                pickVideoClassic.launch("video/*")
+            }) {
                 Text("Galeria (modo clássico)")
             }
             Spacer(Modifier.height(8.dp))
@@ -196,7 +216,7 @@ fun SettingsApp() {
             }) { Text("Escolher ficheiro (Downloads)") }
             Spacer(Modifier.height(4.dp))
             Text(
-                "GIF e imagens voltam a funcionar. 4K → cache leve.",
+                "Só fica 1 wallpaper em disco. Trocar apaga o anterior.",
                 color = Color(0xFF8B949E),
                 fontSize = 11.sp,
             )
@@ -209,19 +229,35 @@ fun SettingsApp() {
                     else -> "Imagem"
                 }
                 Text("Personalizado ativo ($kind)", color = Color(0xFF3FB950), fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(onClick = {
+                    scope.launch {
+                        config.clearCustomWallpaper()
+                        statusMsg = "Wallpaper custom removido"
+                    }
+                }) {
+                    Text("Remover wallpaper custom")
+                }
             }
             if (isVideoWallpaper) {
                 Spacer(Modifier.height(12.dp))
                 Row(
-                    modifier = Modifier.fillMaxWidth().clickable {
-                        scope.launch { config.setWallpaperVideoSound(!wallpaperVideoSound) }
-                    }.padding(vertical = 4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            scope.launch { config.setWallpaperVideoSound(!wallpaperVideoSound) }
+                        }
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Column(Modifier.weight(1f)) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text("Som no vídeo wallpaper", color = Color(0xFFC9D1D9), fontSize = 13.sp)
-                        Text(if (wallpaperVideoSound) "Som ligado" else "Mudo", color = Color(0xFF8B949E), fontSize = 11.sp)
+                        Text(
+                            if (wallpaperVideoSound) "Som ligado" else "Mudo",
+                            color = Color(0xFF8B949E),
+                            fontSize = 11.sp,
+                        )
                     }
                     Switch(
                         checked = wallpaperVideoSound,
@@ -238,10 +274,16 @@ fun SettingsApp() {
             Spacer(Modifier.height(8.dp))
             PowerMode.entries.forEach { mode ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().clickable { scope.launch { config.setPowerMode(mode) } }.padding(vertical = 4.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { scope.launch { config.setPowerMode(mode) } }
+                        .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    RadioButton(selected = power == mode, onClick = { scope.launch { config.setPowerMode(mode) } })
+                    RadioButton(
+                        selected = power == mode,
+                        onClick = { scope.launch { config.setPowerMode(mode) } },
+                    )
                     Text(
                         when (mode) {
                             PowerMode.PERFORMANCE -> "Performance"
@@ -255,18 +297,23 @@ fun SettingsApp() {
             }
             Spacer(Modifier.height(24.dp))
             Text("Sobre", color = Color(0xFFC9D1D9), fontSize = 14.sp)
-            Text("MiniOS 0.3.5 · GIF/IMG/vídeo wallpaper", color = Color(0xFF8B949E), fontSize = 12.sp)
+            Text("MiniOS · wallpaper sem acumulação", color = Color(0xFF8B949E), fontSize = 12.sp)
             Spacer(Modifier.height(40.dp))
         }
-        PcScrollVerticalScrollbar(state = scrollState, modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp))
+        PcScrollVerticalScrollbar(
+            state = scrollState,
+            modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp),
+        )
     }
 }
 
 internal fun isVideoPath(path: String): Boolean {
     if (path.isBlank()) return false
     val p = path.lowercase()
-    return listOf(".mp4", ".webm", ".mkv", ".3gp", ".mov", ".m4v", ".avi", ".ts", ".m2ts", ".flv", ".mpeg", ".mpg")
-        .any { p.endsWith(it) }
+    return listOf(
+        ".mp4", ".webm", ".mkv", ".3gp", ".mov", ".m4v",
+        ".avi", ".ts", ".m2ts", ".flv", ".mpeg", ".mpg",
+    ).any { p.endsWith(it) }
 }
 
 private fun streamCopy(context: Context, uri: Uri, dest: File): Boolean {
@@ -306,69 +353,88 @@ private fun downscaleStillImage(src: File, dest: File, maxSide: Int): Boolean {
     }
 }
 
-private suspend fun saveWallpaper(context: Context, uri: Uri, preferImage: Boolean = false): Pair<String?, String> {
-    val directory = File(context.filesDir, "wallpapers")
+/**
+ * Guarda wallpaper com nome FIXO e apaga os anteriores.
+ * Assim o tamanho da app não cresce a cada troca.
+ */
+private suspend fun saveWallpaper(
+    context: Context,
+    uri: Uri,
+    preferImage: Boolean = false,
+): Pair<String?, String> {
+    val directory = wallpaperStorageDir(context)
     if (!directory.exists()) directory.mkdirs()
+
+    // 1) Limpar tudo o que estava antes (bug fix: acumulação)
+    purgeWallpaperFiles(context)
+    directory.mkdirs()
 
     val mime = context.contentResolver.getType(uri)?.lowercase()
     val nameHint = (uri.lastPathSegment ?: uri.path ?: "").lowercase()
 
-    val tmp = File(directory, "wallpaper_tmp_${System.currentTimeMillis()}.bin")
+    val tmp = File(directory, "_tmp.bin")
     if (!streamCopy(context, uri, tmp)) {
         tmp.delete()
         return null to "Não foi possível ler o ficheiro"
     }
     val extension = sniffExtension(tmp, mime, nameHint, preferImage)
-    val rawFile = File(directory, "wallpaper_raw_${System.currentTimeMillis()}$extension")
-    if (!tmp.renameTo(rawFile)) {
-        tmp.copyTo(rawFile, overwrite = true)
-        tmp.delete()
-    }
 
+    // Ainda imagem estática?
     if (extension in listOf(".jpg", ".jpeg", ".png", ".webp") ||
         (mime?.startsWith("image/") == true && extension != ".gif")
     ) {
-        val scaled = File(directory, "wallpaper_${System.currentTimeMillis()}.jpg")
-        if (downscaleStillImage(rawFile, scaled, MAX_IMAGE_SIDE)) {
-            rawFile.delete()
+        val scaled = File(directory, "current.jpg")
+        if (downscaleStillImage(tmp, scaled, MAX_IMAGE_SIDE)) {
+            tmp.delete()
             return scaled.absolutePath to ""
         }
-        val finalFile = File(directory, "wallpaper_${System.currentTimeMillis()}$extension")
-        rawFile.renameTo(finalFile)
+        val finalFile = File(directory, "current$extension")
+        tmp.renameTo(finalFile)
         return finalFile.absolutePath to ""
     }
 
     if (extension == ".gif") {
-        val finalFile = File(directory, "wallpaper_${System.currentTimeMillis()}.gif")
-        rawFile.renameTo(finalFile)
-        return finalFile.absolutePath to ""
-    }
-
-    val (w, h) = readVideoSize(rawFile)
-    val maxSide = maxOf(w, h)
-    if (w <= 0 || h <= 0 || maxSide <= MAX_SIDE_BEFORE_SCALE) {
-        val finalFile = File(directory, "wallpaper_${System.currentTimeMillis()}.mp4")
-        if (extension == ".mp4") rawFile.renameTo(finalFile)
-        else {
-            rawFile.copyTo(finalFile, overwrite = true)
-            rawFile.delete()
+        val finalFile = File(directory, "current.gif")
+        if (!tmp.renameTo(finalFile)) {
+            tmp.copyTo(finalFile, overwrite = true)
+            tmp.delete()
         }
         return finalFile.absolutePath to ""
     }
 
-    val outFile = File(directory, "wallpaper_${System.currentTimeMillis()}_540p.mp4")
+    // Vídeo
+    val (w, h) = readVideoSize(tmp)
+    val maxSide = maxOf(w, h)
+    if (w <= 0 || h <= 0 || maxSide <= MAX_SIDE_BEFORE_SCALE) {
+        val finalFile = File(directory, "current.mp4")
+        if (extension == ".mp4") {
+            if (!tmp.renameTo(finalFile)) {
+                tmp.copyTo(finalFile, overwrite = true)
+                tmp.delete()
+            }
+        } else {
+            tmp.copyTo(finalFile, overwrite = true)
+            tmp.delete()
+        }
+        return finalFile.absolutePath to ""
+    }
+
+    val outFile = File(directory, "current.mp4")
     val ok = try {
-        downscaleVideo(context, rawFile, outFile, MAX_WALLPAPER_HEIGHT)
+        downscaleVideo(context, tmp, outFile, MAX_WALLPAPER_HEIGHT)
     } catch (_: Exception) {
         false
     }
     if (ok && outFile.exists() && outFile.length() > 0L) {
-        rawFile.delete()
+        tmp.delete()
         return outFile.absolutePath to ""
     }
     outFile.delete()
-    val fallback = File(directory, "wallpaper_${System.currentTimeMillis()}.mp4")
-    rawFile.renameTo(fallback)
+    val fallback = File(directory, "current.mp4")
+    if (!tmp.renameTo(fallback)) {
+        tmp.copyTo(fallback, overwrite = true)
+        tmp.delete()
+    }
     return fallback.absolutePath to ""
 }
 
@@ -382,7 +448,10 @@ private fun readVideoSize(file: File): Pair<Int, Int> {
     } catch (_: Exception) {
         0 to 0
     } finally {
-        try { r.release() } catch (_: Exception) {}
+        try {
+            r.release()
+        } catch (_: Exception) {
+        }
     }
 }
 
@@ -396,14 +465,21 @@ private suspend fun downscaleVideo(
     val transformer = Transformer.Builder(context)
         .setVideoMimeType(MimeTypes.VIDEO_H264)
         .setAudioMimeType(MimeTypes.AUDIO_AAC)
-        .addListener(object : Transformer.Listener {
-            override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                if (cont.isActive) cont.resume(true)
-            }
-            override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
-                if (cont.isActive) cont.resume(false)
-            }
-        }).build()
+        .addListener(
+            object : Transformer.Listener {
+                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                    if (cont.isActive) cont.resume(true)
+                }
+
+                override fun onError(
+                    composition: Composition,
+                    exportResult: ExportResult,
+                    exportException: ExportException,
+                ) {
+                    if (cont.isActive) cont.resume(false)
+                }
+            },
+        ).build()
     val edited = EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(input)))
         .setEffects(Effects(emptyList(), listOf(Presentation.createForHeight(targetHeight))))
         .build()
@@ -413,17 +489,28 @@ private suspend fun downscaleVideo(
         if (cont.isActive) cont.resume(false)
         return@suspendCancellableCoroutine
     }
-    cont.invokeOnCancellation { try { transformer.cancel() } catch (_: Exception) {} }
+    cont.invokeOnCancellation {
+        try {
+            transformer.cancel()
+        } catch (_: Exception) {
+        }
+    }
 }
 
-/** Detecta tipo real do ficheiro (GIF/JPG/PNG/WebP/MP4) — não assume .mp4. */
-private fun sniffExtension(file: File, mime: String?, nameHint: String, preferImage: Boolean): String {
+private fun sniffExtension(
+    file: File,
+    mime: String?,
+    nameHint: String,
+    preferImage: Boolean,
+): String {
     try {
         file.inputStream().use { ins ->
             val head = ByteArray(16)
             val n = ins.read(head)
             if (n >= 3) {
-                if (head[0] == 'G'.code.toByte() && head[1] == 'I'.code.toByte() && head[2] == 'F'.code.toByte()) return ".gif"
+                if (head[0] == 'G'.code.toByte() && head[1] == 'I'.code.toByte() && head[2] == 'F'.code.toByte()) {
+                    return ".gif"
+                }
                 if (head[0] == 0xFF.toByte() && head[1] == 0xD8.toByte()) return ".jpg"
                 if (head[0] == 0x89.toByte() && head[1] == 'P'.code.toByte()) return ".png"
                 if (n >= 12 && head[0] == 'R'.code.toByte() && head[8] == 'W'.code.toByte()) return ".webp"
@@ -444,8 +531,7 @@ private fun sniffExtension(file: File, mime: String?, nameHint: String, preferIm
         mime?.startsWith("image/") == true -> return ".jpg"
     }
     listOf(".gif", ".mp4", ".webm", ".mkv", ".mov", ".png", ".jpg", ".jpeg", ".webp").forEach { ext ->
-        if (nameHint.endsWith(ext)) return if (ext == ".jpeg") ".jpg" else ext
+        if (nameHint.contains(ext)) return ext
     }
-    if (preferImage) return ".jpg"
-    return ".mp4"
+    return if (preferImage) ".jpg" else ".mp4"
 }
