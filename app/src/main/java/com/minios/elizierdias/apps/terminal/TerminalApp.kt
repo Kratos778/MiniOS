@@ -66,6 +66,7 @@ fun TerminalApp() {
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var session by remember { mutableStateOf<LinuxSession?>(null) }
+    var promptCwd by remember { mutableStateOf("/root") }
 
     val lines = remember {
         mutableStateListOf(
@@ -73,6 +74,15 @@ fun TerminalApp() {
             "Debian ARM64 via PRoot (sem root)",
             "",
         )
+    }
+
+    fun prompt(): String {
+        val short = when {
+            promptCwd == "/root" || promptCwd == "~" -> "~"
+            promptCwd.startsWith("/root/") -> "~" + promptCwd.removePrefix("/root")
+            else -> promptCwd
+        }
+        return "root@minios-linux:$short#"
     }
 
     fun scrollToBottom() {
@@ -103,9 +113,10 @@ fun TerminalApp() {
         } else if (!rt.isProotInstalled()) {
             lines.add("Próximo: setup-runtime")
         } else {
-            lines.add("Linux pronto. Se deres Permission denied → repair-proot")
-            lines.add("Exemplos: uname -a | ls / | whoami")
+            lines.add("Linux pronto. Permission denied → repair-proot")
+            lines.add("cd persiste na sessão. Exemplos: uname -a | ls / | cd /sdcard")
             session = linuxManager.startSession()
+            promptCwd = session?.cwd ?: "/root"
         }
         lines.add("")
         scrollToBottom()
@@ -136,16 +147,15 @@ fun TerminalApp() {
         val cmd = normalizeBuiltin(raw)
         when (cmd) {
             "help" -> {
-                lines.add("Comandos MiniOS Linux:")
-                lines.add("  help           — ajuda")
-                lines.add("  status         — estado RootFS/PRoot/storage")
-                lines.add("  install        — Debian ARM64")
-                lines.add("  setup-runtime  — descarregar PRoot")
-                lines.add("  setup-storage  — /sdcard, Download…")
-                lines.add("  repair-proot   — corrigir Permission denied")
-                lines.add("  clear          — limpar")
+                lines.add("Setup:")
+                lines.add("  install | setup-runtime | setup-storage | repair-proot | status")
                 lines.add("")
-                lines.add("Depois: uname -a | ls / | ls /sdcard")
+                lines.add("Sessão (cwd/env persistem):")
+                lines.add("  cd /path | pwd | export NAME=value")
+                lines.add("  uname -a | ls / | cat /etc/os-release")
+                lines.add("  ls /sdcard | ls /sdcard/Download")
+                lines.add("")
+                lines.add("Ainda não: PTY interativo (python REPL, etc.)")
                 lines.add("")
                 return true
             }
@@ -161,6 +171,7 @@ fun TerminalApp() {
                     lines.add(statusMessage)
                     lines.add("enabled : ${LinuxConfig.enabled}")
                     lines.add("ready   : $isReady")
+                    lines.add("cwd     : ${session?.cwd ?: promptCwd}")
                     if (s != null) {
                         lines.add("rootfs  : ${s.rootfsPath}")
                         lines.add("installed: ${s.isInstalled} (${s.distro ?: "—"})")
@@ -209,6 +220,7 @@ fun TerminalApp() {
                     if (r.isSuccess) {
                         lines.add("✓ PRoot OK")
                         session = linuxManager.startSession()
+                        promptCwd = session?.cwd ?: "/root"
                         lines.add("Sessão Linux ativa.")
                     } else {
                         lines.add("✗ ${r.exceptionOrNull()?.message}")
@@ -228,11 +240,8 @@ fun TerminalApp() {
                     val r = linuxManager.repairProot()
                     busy = false
                     lines.add(
-                        if (r.isSuccess) {
-                            "✓ repair-proot OK — tenta: uname -a"
-                        } else {
-                            "✗ ${r.exceptionOrNull()?.message}"
-                        },
+                        if (r.isSuccess) "✓ repair-proot OK — tenta: uname -a"
+                        else "✗ ${r.exceptionOrNull()?.message}",
                     )
                     lines.add("")
                     scrollToBottom()
@@ -249,11 +258,8 @@ fun TerminalApp() {
                     val r = linuxManager.setupStorage()
                     busy = false
                     lines.add(
-                        if (r.isSuccess) {
-                            "✓ storage OK — depois do proot: ls /sdcard"
-                        } else {
-                            "✗ ${r.exceptionOrNull()?.message}"
-                        },
+                        if (r.isSuccess) "✓ storage OK — ls /sdcard"
+                        else "✗ ${r.exceptionOrNull()?.message}",
                     )
                     lines.add("")
                     scrollToBottom()
@@ -265,7 +271,7 @@ fun TerminalApp() {
     }
 
     fun run(cmd: String) {
-        lines.add("root@minios-linux:~# $cmd")
+        lines.add("${prompt()} $cmd")
         if (cmd.isBlank()) {
             lines.add("")
             scrollToBottom()
@@ -281,6 +287,7 @@ fun TerminalApp() {
         scope.launch {
             val out = s.execute(cmd)
             busy = false
+            promptCwd = s.cwd
             if (out.isNotBlank()) {
                 out.lines().forEach { lines.add(it) }
             }
@@ -367,7 +374,7 @@ fun TerminalApp() {
             ),
             placeholder = {
                 Text(
-                    text = "root@minios-linux:~#",
+                    text = prompt(),
                     color = Color(0xFF484F58),
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
