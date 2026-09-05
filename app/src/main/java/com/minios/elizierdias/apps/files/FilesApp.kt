@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.minios.elizierdias.ui.components.PcLazyVerticalScrollbar
 import java.io.File
 
 private data class FileEntry(
@@ -61,6 +63,7 @@ private data class FileEntry(
 fun FilesApp() {
     val context = LocalContext.current
     val activity = context as? ComponentActivity
+    val listState = rememberLazyListState()
 
     var currentDir by remember { mutableStateOf<File?>(null) }
     var entries by remember { mutableStateOf<List<FileEntry>>(emptyList()) }
@@ -131,39 +134,23 @@ fun FilesApp() {
         if (dir == null) {
             val roots = mutableListOf<FileEntry>()
             val ext = Environment.getExternalStorageDirectory()
-            if (ext.exists()) {
-                roots.add(FileEntry("Armazenamento interno", ext, true, true))
-            }
+            if (ext.exists()) roots.add(FileEntry("Armazenamento interno", ext, true, true))
             val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (downloads.exists()) {
-                roots.add(FileEntry("Downloads", downloads, true, true))
-            }
+            if (downloads.exists()) roots.add(FileEntry("Downloads", downloads, true, true))
             val pictures = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-            if (pictures.exists()) {
-                roots.add(FileEntry("Pictures / Galeria", pictures, true, true))
-            }
+            if (pictures.exists()) roots.add(FileEntry("Pictures / Galeria", pictures, true, true))
             val dcim = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM)
-            if (dcim.exists()) {
-                roots.add(FileEntry("DCIM", dcim, true, true))
-            }
+            if (dcim.exists()) roots.add(FileEntry("DCIM", dcim, true, true))
             val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            if (docs.exists()) {
-                roots.add(FileEntry("Documents", docs, true, true))
-            }
+            if (docs.exists()) roots.add(FileEntry("Documents", docs, true, true))
             val music = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-            if (music.exists()) {
-                roots.add(FileEntry("Music", music, true, true))
-            }
+            if (music.exists()) roots.add(FileEntry("Music", music, true, true))
             val movies = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-            if (movies.exists()) {
-                roots.add(FileEntry("Movies", movies, true, true))
-            }
+            if (movies.exists()) roots.add(FileEntry("Movies", movies, true, true))
             entries = roots
             errorMsg = if (roots.isEmpty()) {
                 "Sem acesso ao armazenamento — concede a permissão e toca em Atualizar"
-            } else {
-                ""
-            }
+            } else ""
             return
         }
 
@@ -189,36 +176,20 @@ fun FilesApp() {
     fun refreshPermissionAndLoad() {
         val granted = checkPermission()
         hasPermission = granted
-        if (granted) {
-            loadDir(currentDir)
-        } else {
-            entries = emptyList()
-        }
+        if (granted) loadDir(currentDir) else entries = emptyList()
     }
 
-    // Ao voltar das Definições, revalida a permissão
     DisposableEffect(activity) {
         val owner = activity ?: return@DisposableEffect onDispose { }
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                refreshPermissionAndLoad()
-            }
+            if (event == Lifecycle.Event.ON_RESUME) refreshPermissionAndLoad()
         }
         owner.lifecycle.addObserver(observer)
-        onDispose {
-            owner.lifecycle.removeObserver(observer)
-        }
+        onDispose { owner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(Unit) {
-        refreshPermissionAndLoad()
-    }
-
-    LaunchedEffect(hasPermission) {
-        if (hasPermission) {
-            loadDir(currentDir)
-        }
-    }
+    LaunchedEffect(Unit) { refreshPermissionAndLoad() }
+    LaunchedEffect(hasPermission) { if (hasPermission) loadDir(currentDir) }
 
     Column(
         modifier = Modifier
@@ -257,11 +228,7 @@ fun FilesApp() {
             )
             Button(
                 onClick = {
-                    if (checkPermission()) {
-                        refreshPermissionAndLoad()
-                    } else {
-                        requestAccess()
-                    }
+                    if (checkPermission()) refreshPermissionAndLoad() else requestAccess()
                 },
             ) {
                 Text(
@@ -292,12 +259,6 @@ fun FilesApp() {
                     color = Color(0xFF8B949E),
                     fontSize = 11.sp,
                 )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Depois de ativar, volta aqui — a permissão é detetada automaticamente.",
-                    color = Color(0xFF8B949E),
-                    fontSize = 11.sp,
-                )
             }
         }
 
@@ -311,38 +272,43 @@ fun FilesApp() {
         }
 
         if (hasPermission) {
-            LazyColumn {
-                items(entries) { e ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                if (e.isDir && e.file != null) {
-                                    currentDir = e.file
-                                    loadDir(e.file)
+            Row(Modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    items(entries) { e ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (e.isDir && e.file != null) {
+                                        currentDir = e.file
+                                        loadDir(e.file)
+                                    }
                                 }
-                            }
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = when {
-                                e.isShortcut -> Icons.Filled.PhoneAndroid
-                                e.isDir -> Icons.Filled.Folder
-                                else -> Icons.Filled.InsertDriveFile
-                            },
-                            contentDescription = null,
-                            tint = if (e.isDir) Color(0xFF58A6FF) else Color(0xFF8B949E),
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = e.name,
-                            color = Color(0xFFC9D1D9),
-                            fontSize = 14.sp,
-                        )
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = when {
+                                    e.isShortcut -> Icons.Filled.PhoneAndroid
+                                    e.isDir -> Icons.Filled.Folder
+                                    else -> Icons.Filled.InsertDriveFile
+                                },
+                                contentDescription = null,
+                                tint = if (e.isDir) Color(0xFF58A6FF) else Color(0xFF8B949E),
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(text = e.name, color = Color(0xFFC9D1D9), fontSize = 14.sp)
+                        }
                     }
                 }
+                PcLazyVerticalScrollbar(
+                    state = listState,
+                    modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp),
+                )
             }
         }
     }
