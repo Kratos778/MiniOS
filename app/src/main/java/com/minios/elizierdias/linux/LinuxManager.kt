@@ -20,16 +20,14 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * Central entry point for the MiniOS Linux subsystem.
  *
- * Responsibilities (future):
- * - Bootstrap / stop the Linux runtime (PRoot / native ARM64)
- * - Manage sessions and processes
- * - Coordinate package installation and app registration
- *
- * Current state: skeleton only. No native runtime linked yet.
+ * Etapa 2: prepares persistent directories for RootFS on private storage.
+ * Later stages will add real runtime (PRoot / native), sessions and packages.
  */
 class LinuxManager(
     private val context: Context,
 ) {
+
+    private val rootFs = LinuxRootFs(context)
 
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
@@ -37,19 +35,50 @@ class LinuxManager(
     private val _statusMessage = MutableStateFlow("Linux subsystem not initialized")
     val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
+    private val _rootFsStatus = MutableStateFlow<LinuxRootFs.Status?>(null)
+    val rootFsStatus: StateFlow<LinuxRootFs.Status?> = _rootFsStatus.asStateFlow()
+
     private var currentSession: LinuxSession? = null
 
     /**
      * Initialize the Linux subsystem.
-     * In later stages this will extract / verify RootFS and start the runtime.
+     * - Creates runtime / rootfs / downloads / bin directories
+     * - Checks whether a RootFS is already marked as installed
+     * - Updates status flows for UI
      */
     suspend fun initialize() {
-        _statusMessage.value = "Initializing Linux subsystem (skeleton)..."
-        // TODO: check private storage, extract RootFS if needed, start runtime
-        _statusMessage.value = "Linux subsystem skeleton ready (no runtime yet)"
-        _isReady.value = false // stays false until real runtime is connected
-        LinuxConfig.setEnabled(false)
+        _statusMessage.value = "Preparing Linux runtime directories..."
+
+        val prepareResult = rootFs.prepareForInstallation()
+        if (prepareResult.isFailure) {
+            _statusMessage.value = "Failed to prepare directories: ${prepareResult.exceptionOrNull()?.message}"
+            _isReady.value = false
+            LinuxConfig.setEnabled(false)
+            return
+        }
+
+        val status = rootFs.status()
+        _rootFsStatus.value = status
+
+        if (status.isInstalled) {
+            _statusMessage.value = "RootFS installed (${status.distro ?: "unknown"}) — runtime not connected yet"
+            // Still not fully ready until native runtime is linked
+            _isReady.value = false
+            LinuxConfig.setEnabled(false)
+        } else {
+            _statusMessage.value = prepareResult.getOrNull()
+                ?: "Directories ready. RootFS not installed yet."
+            _isReady.value = false
+            LinuxConfig.setEnabled(false)
+        }
     }
+
+    /** Refresh RootFS status (e.g. after external changes) */
+    suspend fun refreshRootFsStatus() {
+        _rootFsStatus.value = rootFs.status()
+    }
+
+    fun getRootFs(): LinuxRootFs = rootFs
 
     /**
      * Start a new Linux session (shell).
