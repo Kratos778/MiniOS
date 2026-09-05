@@ -65,6 +65,7 @@ import java.io.File
 import java.io.FileOutputStream
 import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -92,6 +93,11 @@ fun SettingsApp() {
     fun saveAndApply(uri: Uri, preferImage: Boolean = false) {
         scope.launch {
             statusMsg = "A guardar wallpaper..."
+            // 1) Tira o player do ecrã (liberta current.mp4/gif)
+            config.detachWallpaperForReplace()
+            delay(120)
+
+            // 2) Grava o novo ficheiro (purge + current.*)
             val result = withContext(Dispatchers.IO) {
                 try {
                     saveWallpaper(context, uri, preferImage)
@@ -103,13 +109,14 @@ fun SettingsApp() {
             }
             val savedPath = result.first
             if (savedPath != null) {
+                // 3) Aplica path + incrementa versão (Compose recria player)
                 config.setWallpaperUri(savedPath)
                 val kind = when {
                     isVideoPath(savedPath) -> "vídeo"
                     savedPath.endsWith(".gif", true) -> "GIF"
                     else -> "imagem"
                 }
-                statusMsg = "Wallpaper $kind ativo (ficheiro único)"
+                statusMsg = "Wallpaper $kind ativo"
             } else {
                 statusMsg = "Erro: ${result.second}"
             }
@@ -216,7 +223,7 @@ fun SettingsApp() {
             }) { Text("Escolher ficheiro (Downloads)") }
             Spacer(Modifier.height(4.dp))
             Text(
-                "Só fica 1 wallpaper em disco. Trocar apaga o anterior.",
+                "Vídeo→vídeo e GIF→GIF funcionam (versão de conteúdo).",
                 color = Color(0xFF8B949E),
                 fontSize = 11.sp,
             )
@@ -297,7 +304,7 @@ fun SettingsApp() {
             }
             Spacer(Modifier.height(24.dp))
             Text("Sobre", color = Color(0xFFC9D1D9), fontSize = 14.sp)
-            Text("MiniOS · wallpaper sem acumulação", color = Color(0xFF8B949E), fontSize = 12.sp)
+            Text("MiniOS · live wallpaper fix", color = Color(0xFF8B949E), fontSize = 12.sp)
             Spacer(Modifier.height(40.dp))
         }
         PcScrollVerticalScrollbar(
@@ -353,10 +360,6 @@ private fun downscaleStillImage(src: File, dest: File, maxSide: Int): Boolean {
     }
 }
 
-/**
- * Guarda wallpaper com nome FIXO e apaga os anteriores.
- * Assim o tamanho da app não cresce a cada troca.
- */
 private suspend fun saveWallpaper(
     context: Context,
     uri: Uri,
@@ -365,7 +368,6 @@ private suspend fun saveWallpaper(
     val directory = wallpaperStorageDir(context)
     if (!directory.exists()) directory.mkdirs()
 
-    // 1) Limpar tudo o que estava antes (bug fix: acumulação)
     purgeWallpaperFiles(context)
     directory.mkdirs()
 
@@ -379,7 +381,6 @@ private suspend fun saveWallpaper(
     }
     val extension = sniffExtension(tmp, mime, nameHint, preferImage)
 
-    // Ainda imagem estática?
     if (extension in listOf(".jpg", ".jpeg", ".png", ".webp") ||
         (mime?.startsWith("image/") == true && extension != ".gif")
     ) {
@@ -402,7 +403,6 @@ private suspend fun saveWallpaper(
         return finalFile.absolutePath to ""
     }
 
-    // Vídeo
     val (w, h) = readVideoSize(tmp)
     val maxSide = maxOf(w, h)
     if (w <= 0 || h <= 0 || maxSide <= MAX_SIDE_BEFORE_SCALE) {
