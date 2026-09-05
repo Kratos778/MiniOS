@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Runs commands inside the Debian RootFS via PRoot (no root required).
+ * Terminal-only subsystem — does not touch Desktop/wallpaper.
  */
 class LinuxRuntime(
     private val context: Context,
@@ -43,7 +44,6 @@ class LinuxRuntime(
         val stderr: String,
     )
 
-    /** Preferred locations for the proot binary (Android often blocks exec in files/). */
     private fun prootCandidates(): List<File> = listOf(
         File(context.codeCacheDir, "proot"),
         File(context.noBackupFilesDir, "proot"),
@@ -66,19 +66,14 @@ class LinuxRuntime(
     fun isFullyReady(): Boolean =
         isRootFsReady() && isProotInstalled()
 
-    /**
-     * Make file executable using Os.chmod (setExecutable alone is often not enough).
-     */
     private fun forceExecutable(file: File): Boolean {
         return try {
             file.setReadable(true, false)
             file.setWritable(true, true)
             file.setExecutable(true, false)
             try {
-                // 0755
                 Os.chmod(file.absolutePath, 493)
             } catch (_: Exception) {
-                // some devices throw; setExecutable may still work
             }
             file.canExecute() || file.length() > 10_000
         } catch (_: Exception) {
@@ -95,6 +90,25 @@ class LinuxRuntime(
         }
     }
 
+    /** DNS para apt / rede dentro do RootFS */
+    fun ensureDns() {
+        try {
+            val etc = File(LinuxConfig.rootfsDir(context), "etc")
+            if (!etc.exists()) return
+            val resolv = File(etc, "resolv.conf")
+            if (!resolv.exists() || resolv.length() < 8) {
+                resolv.writeText(
+                    "nameserver 8.8.8.8\nnameserver 1.1.1.1\nnameserver 8.8.4.4\n",
+                )
+            }
+            val hosts = File(etc, "hosts")
+            if (!hosts.exists()) {
+                hosts.writeText("127.0.0.1\tlocalhost\n::1\tlocalhost\n")
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     suspend fun ensureProot(onProgress: ProgressListener? = null): Result<Unit> =
         withContext(Dispatchers.IO) {
             try {
@@ -106,12 +120,12 @@ class LinuxRuntime(
                 val existing = resolveProot()
                 if (existing != null) {
                     forceExecutable(existing)
-                    // Ensure codeCache copy exists (best chance to exec on Android 10+)
                     val cacheCopy = File(context.codeCacheDir, "proot")
                     if (existing.absolutePath != cacheCopy.absolutePath) {
                         copyFile(existing, cacheCopy)
                         forceExecutable(cacheCopy)
                     }
+                    ensureDns()
                     onProgress?.onProgress("PRoot already present (${existing.length()} bytes).")
                     return@withContext Result.success(Unit)
                 }
@@ -121,7 +135,6 @@ class LinuxRuntime(
                 downloadBinary(LinuxConfig.PROOT_URL, primary, onProgress).getOrThrow()
                 forceExecutable(primary)
 
-                // Install into codeCacheDir + noBackup (exec often allowed there)
                 val cacheProot = File(context.codeCacheDir, "proot")
                 copyFile(primary, cacheProot)
                 forceExecutable(cacheProot)
@@ -135,6 +148,7 @@ class LinuxRuntime(
                         IllegalStateException("proot downloaded but not found on disk"),
                     )
 
+                ensureDns()
                 onProgress?.onProgress("PRoot ready (${resolved.length()} bytes) @ ${resolved.parent}")
                 Result.success(Unit)
             } catch (e: Exception) {
@@ -142,9 +156,6 @@ class LinuxRuntime(
             }
         }
 
-    /**
-     * Re-apply chmod / re-copy proot (use if you still get Permission denied).
-     */
     suspend fun repairProot(onProgress: ProgressListener? = null): Result<Unit> =
         withContext(Dispatchers.IO) {
             try {
@@ -165,6 +176,7 @@ class LinuxRuntime(
                     forceExecutable(t)
                     onProgress?.onProgress("chmod 0755 → ${t.absolutePath}")
                 }
+                ensureDns()
                 Result.success(Unit)
             } catch (e: Exception) {
                 Result.failure(e)
@@ -221,6 +233,7 @@ class LinuxRuntime(
                 )
 
                 LinuxConfig.storageMarker(context).writeText("ok")
+                ensureDns()
                 onProgress?.onProgress("setup-storage: OK")
                 onProgress?.onProgress("Inside Linux use: ls /sdcard  or  ls /sdcard/Download")
                 Result.success(Unit)
@@ -230,8 +243,7 @@ class LinuxRuntime(
         }
 
     fun buildProotCommand(command: String): List<String> {
-        val prootFile = resolveProot()
-            ?: error("PRoot binary not found")
+        val prootFile = resolveProot() ?: error("PRoot binary not found")
         forceExecutable(prootFile)
 
         val proot = prootFile.absolutePath
@@ -250,6 +262,12 @@ class LinuxRuntime(
             "-b", "/sys",
             "-b", "$tmp:/tmp",
         )
+
+        // Rede: /etc/resolv.conf do Android se existir
+        val androidResolv = File("/system/etc/resolv.conf")
+        if (androidResolv.exists()) {
+            args += listOf("-b", "${androidResolv.absolutePath}:/etc/resolv.conf")
+        }
 
         val external = Environment.getExternalStorageDirectory()
         if (external != null && external.exists()) {
@@ -288,8 +306,8 @@ class LinuxRuntime(
                 )
             }
 
-            // Repair perms every run (cheap) — fixes many Permission denied cases
             resolveProot()?.let { forceExecutable(it) }
+            ensureDns()
 
             val cmd = buildProotCommand(command)
             val pb = ProcessBuilder(cmd)
@@ -305,11 +323,9 @@ class LinuxRuntime(
             val process = try {
                 pb.start()
             } catch (e: Exception) {
-                // Auto-repair once and retry
                 repairProot(null)
-                val retryCmd = buildProotCommand(command)
                 try {
-                    ProcessBuilder(retryCmd).also { p ->
+                    ProcessBuilder(buildProotCommand(command)).also { p ->
                         p.redirectErrorStream(false)
                         p.environment()["PROOT_TMP_DIR"] =
                             LinuxConfig.tmpDir(context).absolutePath
@@ -323,8 +339,7 @@ class LinuxRuntime(
                     return@withContext Result.failure(
                         IllegalStateException(
                             "Cannot execute proot (Permission denied). " +
-                                "Run: repair-proot\n" +
-                                "Detail: ${e2.message}",
+                                "Run: repair-proot\nDetail: ${e2.message}",
                             e2,
                         ),
                     )
