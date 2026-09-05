@@ -19,9 +19,6 @@ import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Central entry point for the MiniOS Linux subsystem.
- *
- * Etapa 2: prepares persistent directories for RootFS on private storage.
- * Later stages will add real runtime (PRoot / native), sessions and packages.
  */
 class LinuxManager(
     private val context: Context,
@@ -38,20 +35,18 @@ class LinuxManager(
     private val _rootFsStatus = MutableStateFlow<LinuxRootFs.Status?>(null)
     val rootFsStatus: StateFlow<LinuxRootFs.Status?> = _rootFsStatus.asStateFlow()
 
+    private val _installProgress = MutableStateFlow<String?>(null)
+    val installProgress: StateFlow<String?> = _installProgress.asStateFlow()
+
     private var currentSession: LinuxSession? = null
 
-    /**
-     * Initialize the Linux subsystem.
-     * - Creates runtime / rootfs / downloads / bin directories
-     * - Checks whether a RootFS is already marked as installed
-     * - Updates status flows for UI
-     */
     suspend fun initialize() {
         _statusMessage.value = "Preparing Linux runtime directories..."
 
         val prepareResult = rootFs.prepareForInstallation()
         if (prepareResult.isFailure) {
-            _statusMessage.value = "Failed to prepare directories: ${prepareResult.exceptionOrNull()?.message}"
+            _statusMessage.value =
+                "Failed to prepare directories: ${prepareResult.exceptionOrNull()?.message}"
             _isReady.value = false
             LinuxConfig.setEnabled(false)
             return
@@ -61,8 +56,8 @@ class LinuxManager(
         _rootFsStatus.value = status
 
         if (status.isInstalled) {
-            _statusMessage.value = "RootFS installed (${status.distro ?: "unknown"}) — runtime not connected yet"
-            // Still not fully ready until native runtime is linked
+            _statusMessage.value =
+                "RootFS installed (${status.distro ?: "unknown"}) — runtime not connected yet"
             _isReady.value = false
             LinuxConfig.setEnabled(false)
         } else {
@@ -73,17 +68,30 @@ class LinuxManager(
         }
     }
 
-    /** Refresh RootFS status (e.g. after external changes) */
+    /**
+     * Download + extract Debian ARM64 RootFS.
+     * Call from Terminal with command `install`.
+     */
+    suspend fun installRootFs(): Result<Unit> {
+        _installProgress.value = "Starting RootFS installation..."
+        val result = rootFs.install { msg ->
+            _installProgress.value = msg
+            _statusMessage.value = msg
+        }
+        _rootFsStatus.value = rootFs.status()
+        if (result.isSuccess) {
+            _statusMessage.value =
+                "RootFS installed (${_rootFsStatus.value?.distro}) — runtime still pending"
+        }
+        return result
+    }
+
     suspend fun refreshRootFsStatus() {
         _rootFsStatus.value = rootFs.status()
     }
 
     fun getRootFs(): LinuxRootFs = rootFs
 
-    /**
-     * Start a new Linux session (shell).
-     * Returns null while the real runtime is not available.
-     */
     fun startSession(): LinuxSession? {
         if (!LinuxConfig.enabled || !_isReady.value) {
             return null

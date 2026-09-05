@@ -23,48 +23,41 @@ import java.io.File
  */
 object LinuxConfig {
 
-    /** Base directory name inside app private storage for the Linux runtime */
     const val RUNTIME_DIR_NAME = "linux_runtime"
-
-    /** Directory that will hold the extracted RootFS */
     const val ROOTFS_DIR_NAME = "rootfs"
-
-    /** Directory for temporary downloads (rootfs tarballs, etc.) */
     const val DOWNLOAD_DIR_NAME = "downloads"
-
-    /** Directory for runtime binaries (proot, busybox, etc.) when added later */
     const val BIN_DIR_NAME = "bin"
-
-    /** Marker file written when a RootFS has been successfully prepared */
     const val INSTALLED_MARKER = ".minios_rootfs_installed"
 
-    /** Default distribution for the first implementation */
-    const val DEFAULT_DISTRO = "debian-arm64"
+    const val DEFAULT_DISTRO = "debian-bookworm-arm64"
 
-    /** Path of the default shell inside the RootFS */
     const val DEFAULT_SHELL = "/bin/bash"
-
-    /** Fallback shell if bash is not available */
     const val FALLBACK_SHELL = "/bin/sh"
 
-    /** Supported distros (future multi-distro support) */
+    /**
+     * Official proot-distro Debian bookworm aarch64 rootfs.
+     * Source: termux/proot-distro releases
+     */
+    const val ROOTFS_URL =
+        "https://github.com/termux/proot-distro/releases/download/v4.17.3/debian-bookworm-aarch64-pd-v4.17.3.tar.xz"
+
+    const val ROOTFS_SHA256 =
+        "3a841a794ae5999b33e33b329582ed0379d4f54ca62c6ce5a8eb9cff5ef8900b"
+
+    const val ROOTFS_FILENAME = "debian-bookworm-aarch64-pd-v4.17.3.tar.xz"
+
     val SUPPORTED_DISTROS = listOf(
-        "debian-arm64",
+        "debian-bookworm-arm64",
         "ubuntu-arm64",
         "alpine-arm64",
     )
 
-    /** Whether the Linux subsystem is enabled (feature flag) */
     var enabled: Boolean = false
         private set
 
     fun setEnabled(value: Boolean) {
         enabled = value
     }
-
-    // -------------------------------------------------------------------------
-    // Path helpers (all under Context.filesDir — no extra permissions needed)
-    // -------------------------------------------------------------------------
 
     fun runtimeDir(context: Context): File =
         File(context.filesDir, RUNTIME_DIR_NAME)
@@ -80,4 +73,7 @@ object LinuxConfig {
 
     fun installedMarker(context: Context): File =
         File(rootfsDir(context), INSTALLED_MARKER)
+
+    fun rootfsTarball(context: Context): File =
+        File(downloadDir(context), ROOTFS_FILENAME)
 }
