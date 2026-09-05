@@ -66,6 +66,7 @@ fun Desktop() {
 
     val wallpaperId by config.wallpaperId.collectAsState(initial = "default_gradient")
     val wallpaperUri by config.wallpaperUri.collectAsState(initial = "")
+    val wallpaperVersion by config.wallpaperVersion.collectAsState(initial = 0L)
     val wallpaperVideoSound by config.wallpaperVideoSound.collectAsState(initial = false)
     val wallpaper = Wallpapers.byId(wallpaperId)
 
@@ -101,6 +102,7 @@ fun Desktop() {
         ) {
             WallpaperLayer(
                 wallpaperUri = wallpaperUri,
+                wallpaperVersion = wallpaperVersion,
                 gradientBrush = wallpaper.brush,
                 videoSound = wallpaperVideoSound,
             )
@@ -188,10 +190,15 @@ fun Desktop() {
     }
 }
 
-/** Wallpaper: vídeo / GIF / imagem / gradiente. Sempre Crop + clip. */
+/**
+ * Wallpaper layer.
+ * [wallpaperVersion] muda sempre que o conteúdo muda, mesmo se o path
+ * for sempre current.mp4 / current.gif — força recriação do player.
+ */
 @Composable
 private fun WallpaperLayer(
     wallpaperUri: String,
+    wallpaperVersion: Long,
     gradientBrush: Brush,
     videoSound: Boolean,
 ) {
@@ -205,27 +212,38 @@ private fun WallpaperLayer(
             .clipToBounds(),
     ) {
         if (isVideo) {
-            key(wallpaperUri, videoSound) {
+            key(wallpaperUri, wallpaperVersion, videoSound) {
                 VideoWallpaper(
                     source = wallpaperUri,
+                    contentKey = wallpaperVersion,
                     modifier = Modifier.fillMaxSize(),
                     soundEnabled = videoSound,
                 )
             }
         } else if (isGif) {
-            key(wallpaperUri) {
+            key(wallpaperUri, wallpaperVersion) {
                 AnimatedWallpaper(
                     source = wallpaperUri,
+                    contentKey = wallpaperVersion,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
         } else if (wallpaperUri.isNotBlank()) {
-            key(wallpaperUri) {
+            key(wallpaperUri, wallpaperVersion) {
                 val file = File(wallpaperUri)
                 val model = if (file.exists()) {
-                    ImageRequest.Builder(context).data(file).crossfade(true).build()
+                    ImageRequest.Builder(context)
+                        .data(file)
+                        .memoryCacheKey("wp-$wallpaperVersion")
+                        .diskCacheKey("wp-$wallpaperVersion")
+                        .crossfade(true)
+                        .build()
                 } else {
-                    ImageRequest.Builder(context).data(wallpaperUri).crossfade(true).build()
+                    ImageRequest.Builder(context)
+                        .data(wallpaperUri)
+                        .memoryCacheKey("wp-$wallpaperVersion")
+                        .crossfade(true)
+                        .build()
                 }
                 AsyncImage(
                     model = model,

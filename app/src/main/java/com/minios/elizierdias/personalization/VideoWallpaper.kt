@@ -22,19 +22,19 @@ import java.io.File
 
 /**
  * Wallpaper de vídeo em loop.
- * RESIZE_MODE_ZOOM = Crop (preenche, corta excesso, sem barras).
- * Buffers mínimos — evita OOM com ficheiros grandes.
- * O parent Desktop já faz clipToBounds acima da taskbar.
+ * [contentKey] força novo ExoPlayer quando o ficheiro current.mp4 é substituído
+ * (mesmo path, conteúdo diferente).
  */
 @Composable
 fun VideoWallpaper(
     source: String,
     modifier: Modifier = Modifier,
     soundEnabled: Boolean = false,
+    contentKey: Long = 0L,
 ) {
     val context = LocalContext.current
 
-    val mediaUri = remember(source) {
+    val mediaUri = remember(source, contentKey) {
         when {
             source.startsWith("content://") -> Uri.parse(source)
             source.startsWith("/") -> Uri.fromFile(File(source))
@@ -45,7 +45,7 @@ fun VideoWallpaper(
 
     if (mediaUri == null) return
 
-    val player = remember(source) {
+    val player = remember(source, contentKey) {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 /* minBufferMs */ 500,
@@ -53,7 +53,7 @@ fun VideoWallpaper(
                 /* bufferForPlaybackMs */ 250,
                 /* bufferForPlaybackAfterRebufferMs */ 500,
             )
-            .setTargetBufferBytes(2 * 1024 * 1024) // max ~2MB em buffer
+            .setTargetBufferBytes(2 * 1024 * 1024)
             .build()
 
         ExoPlayer.Builder(context)
@@ -75,10 +75,16 @@ fun VideoWallpaper(
         }
     }
 
-    DisposableEffect(source) {
+    DisposableEffect(source, contentKey) {
         onDispose {
-            try { player.stop() } catch (_: Exception) {}
-            try { player.release() } catch (_: Exception) {}
+            try {
+                player.stop()
+            } catch (_: Exception) {
+            }
+            try {
+                player.release()
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -93,7 +99,6 @@ fun VideoWallpaper(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 useController = false
-                // Crop: preenche o viewport, corta o excesso (como ContentScale.Crop)
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 this.player = player
                 setBackgroundColor(0xFF0D1117.toInt())

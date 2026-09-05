@@ -3,6 +3,7 @@ package com.minios.elizierdias.core
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import java.io.File
@@ -23,19 +24,24 @@ object ConfigKeys {
     val WALLPAPER_URI =
         stringPreferencesKey("wallpaper_uri")
 
+    /**
+     * Identity of wallpaper *content*.
+     * Path can stay current.mp4; version always changes on each save
+     * so Compose recreates VideoWallpaper / AnimatedWallpaper.
+     */
+    val WALLPAPER_VERSION =
+        longPreferencesKey("wallpaper_version")
+
     val POWER_MODE =
         stringPreferencesKey("power_mode")
 
-    /** true = vídeo wallpaper com som; false = mudo */
     val WALLPAPER_VIDEO_SOUND =
         booleanPreferencesKey("wallpaper_video_sound")
 }
 
-/** Pasta única de wallpapers custom — deve ser limpa ao trocar. */
 fun wallpaperStorageDir(context: Context): File =
     File(context.filesDir, "wallpapers")
 
-/** Apaga todos os ficheiros de wallpaper em disco (não toca no DataStore). */
 suspend fun purgeWallpaperFiles(context: Context) = withContext(Dispatchers.IO) {
     val dir = wallpaperStorageDir(context)
     if (!dir.exists()) return@withContext
@@ -64,7 +70,11 @@ class MiniOSConfig(
                 ?: ""
         }
 
-    /** Som do vídeo wallpaper (default: desligado) */
+    val wallpaperVersion: Flow<Long> =
+        context.dataStore.data.map { preferences ->
+            preferences[ConfigKeys.WALLPAPER_VERSION] ?: 0L
+        }
+
     val wallpaperVideoSound: Flow<Boolean> =
         context.dataStore.data.map { preferences ->
             preferences[ConfigKeys.WALLPAPER_VIDEO_SOUND] ?: false
@@ -79,12 +89,27 @@ class MiniOSConfig(
             }
         }
 
-    /** Gradiente predefinido — limpa ficheiros custom do disco. */
+    /** Gradiente — limpa ficheiros e reseta versão. */
     suspend fun setWallpaper(id: String) {
-        purgeWallpaperFiles(context)
+        // Limpa URI primeiro para o player libertar o ficheiro
         context.dataStore.edit { preferences ->
-            preferences[ConfigKeys.WALLPAPER_ID] = id
             preferences[ConfigKeys.WALLPAPER_URI] = ""
+            preferences[ConfigKeys.WALLPAPER_ID] = id
+            preferences[ConfigKeys.WALLPAPER_VERSION] =
+                (preferences[ConfigKeys.WALLPAPER_VERSION] ?: 0L) + 1L
+        }
+        purgeWallpaperFiles(context)
+    }
+
+    /**
+     * Antes de gravar ficheiro novo: tira o URI do ecrã para o ExoPlayer
+     * libertar current.mp4 (evita ficheiro bloqueado no purge).
+     */
+    suspend fun detachWallpaperForReplace() {
+        context.dataStore.edit { preferences ->
+            preferences[ConfigKeys.WALLPAPER_URI] = ""
+            preferences[ConfigKeys.WALLPAPER_VERSION] =
+                (preferences[ConfigKeys.WALLPAPER_VERSION] ?: 0L) + 1L
         }
     }
 
@@ -92,6 +117,8 @@ class MiniOSConfig(
         context.dataStore.edit { preferences ->
             preferences[ConfigKeys.WALLPAPER_ID] = "custom_photo"
             preferences[ConfigKeys.WALLPAPER_URI] = uri
+            preferences[ConfigKeys.WALLPAPER_VERSION] =
+                (preferences[ConfigKeys.WALLPAPER_VERSION] ?: 0L) + 1L
         }
     }
 
@@ -108,10 +135,12 @@ class MiniOSConfig(
     }
 
     suspend fun clearCustomWallpaper() {
-        purgeWallpaperFiles(context)
         context.dataStore.edit { preferences ->
             preferences[ConfigKeys.WALLPAPER_ID] = "default_gradient"
             preferences[ConfigKeys.WALLPAPER_URI] = ""
+            preferences[ConfigKeys.WALLPAPER_VERSION] =
+                (preferences[ConfigKeys.WALLPAPER_VERSION] ?: 0L) + 1L
         }
+        purgeWallpaperFiles(context)
     }
 }
