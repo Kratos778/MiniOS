@@ -93,6 +93,19 @@ class LinuxManager(
         return result
     }
 
+    suspend fun repairProot(): Result<Unit> {
+        _installProgress.value = "Repairing proot..."
+        val result = runtime.repairProot { msg ->
+            _installProgress.value = msg
+            _statusMessage.value = msg
+        }
+        if (result.isSuccess && rootFs.isInstalled()) {
+            _isReady.value = true
+            LinuxConfig.setEnabled(true)
+        }
+        return result
+    }
+
     suspend fun setupStorage(): Result<Unit> {
         _installProgress.value = "setup-storage..."
         val result = runtime.setupStorage { msg ->

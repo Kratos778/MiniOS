@@ -51,15 +51,6 @@ import com.minios.elizierdias.linux.LinuxRootFs
 import com.minios.elizierdias.linux.LinuxSession
 import kotlinx.coroutines.launch
 
-/**
- * Terminal Linux only — abre pelo ícone do Desktop.
- *
- * Fluxo:
- *   install        → descarrega + extrai Debian ARM64
- *   setup-runtime  → descarrega PRoot
- *   setup-storage  → monta /sdcard (estilo Termux, sem root)
- *   depois: ls, cd, uname, apt, unzip… via PRoot
- */
 @Composable
 fun TerminalApp() {
     val context = LocalContext.current
@@ -112,7 +103,8 @@ fun TerminalApp() {
         } else if (!rt.isProotInstalled()) {
             lines.add("Próximo: setup-runtime")
         } else {
-            lines.add("Linux pronto. Exemplos: uname -a | ls / | whoami")
+            lines.add("Linux pronto. Se deres Permission denied → repair-proot")
+            lines.add("Exemplos: uname -a | ls / | whoami")
             session = linuxManager.startSession()
         }
         lines.add("")
@@ -127,21 +119,33 @@ fun TerminalApp() {
         }
     }
 
-    fun runBuiltin(cmd: String): Boolean {
+    fun normalizeBuiltin(cmd: String): String {
+        val c = cmd.trim().lowercase()
+        return when (c) {
+            "setup-storege", "setup-stroage", "setupstorage", "setup_storage" ->
+                "setup-storage"
+            "setup-runtime", "setupruntime", "setup_runtime" ->
+                "setup-runtime"
+            "repair-proot", "repairproot", "fix-proot" ->
+                "repair-proot"
+            else -> cmd.trim()
+        }
+    }
+
+    fun runBuiltin(raw: String): Boolean {
+        val cmd = normalizeBuiltin(raw)
         when (cmd) {
             "help" -> {
                 lines.add("Comandos MiniOS Linux:")
                 lines.add("  help           — ajuda")
                 lines.add("  status         — estado RootFS/PRoot/storage")
-                lines.add("  install        — Debian ARM64 (download+extract)")
+                lines.add("  install        — Debian ARM64")
                 lines.add("  setup-runtime  — descarregar PRoot")
-                lines.add("  setup-storage  — /sdcard, Download, DCIM…")
+                lines.add("  setup-storage  — /sdcard, Download…")
+                lines.add("  repair-proot   — corrigir Permission denied")
                 lines.add("  clear          — limpar")
                 lines.add("")
-                lines.add("Depois de install + setup-runtime, comandos Linux reais:")
-                lines.add("  uname -a | ls / | cat /etc/os-release | pwd")
-                lines.add("  cd /sdcard/Download && ls")
-                lines.add("  apt update   (quando rede/DNS estiverem ok no rootfs)")
+                lines.add("Depois: uname -a | ls / | ls /sdcard")
                 lines.add("")
                 return true
             }
@@ -164,6 +168,7 @@ fun TerminalApp() {
                     }
                     lines.add("proot   : ${if (rt.isProotInstalled()) "ok" else "no"}")
                     lines.add("storage : ${if (rt.isStorageReady()) "ok" else "no"}")
+                    lines.add("proot path: ${rt.resolveProot()?.absolutePath ?: "—"}")
                     lines.add("")
                     scrollToBottom()
                 }
@@ -183,7 +188,10 @@ fun TerminalApp() {
                 scope.launch {
                     val r = linuxManager.installRootFs()
                     busy = false
-                    lines.add(if (r.isSuccess) "✓ install OK — agora: setup-runtime" else "✗ ${r.exceptionOrNull()?.message}")
+                    lines.add(
+                        if (r.isSuccess) "✓ install OK — agora: setup-runtime"
+                        else "✗ ${r.exceptionOrNull()?.message}",
+                    )
                     lines.add("")
                     scrollToBottom()
                 }
@@ -210,6 +218,27 @@ fun TerminalApp() {
                 }
                 return true
             }
+            "repair-proot" -> {
+                if (busy) {
+                    lines.add("ocupado...")
+                    return true
+                }
+                busy = true
+                scope.launch {
+                    val r = linuxManager.repairProot()
+                    busy = false
+                    lines.add(
+                        if (r.isSuccess) {
+                            "✓ repair-proot OK — tenta: uname -a"
+                        } else {
+                            "✗ ${r.exceptionOrNull()?.message}"
+                        },
+                    )
+                    lines.add("")
+                    scrollToBottom()
+                }
+                return true
+            }
             "setup-storage" -> {
                 if (busy) {
                     lines.add("ocupado...")
@@ -221,7 +250,7 @@ fun TerminalApp() {
                     busy = false
                     lines.add(
                         if (r.isSuccess) {
-                            "✓ storage OK — tenta: ls /sdcard"
+                            "✓ storage OK — depois do proot: ls /sdcard"
                         } else {
                             "✗ ${r.exceptionOrNull()?.message}"
                         },
@@ -247,7 +276,6 @@ fun TerminalApp() {
             return
         }
 
-        // Comando real via PRoot
         val s = session ?: linuxManager.startSession().also { session = it }
         busy = true
         scope.launch {
