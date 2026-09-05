@@ -17,7 +17,7 @@ object AppRegistry {
             "files",
             "Files",
             Icons.Filled.Folder,
-            defaultSize = Size(560f, 400f),
+            defaultSize = Size(480f, 360f),
         )
 
     val terminal =
@@ -25,7 +25,7 @@ object AppRegistry {
             "terminal",
             "Terminal",
             Icons.Filled.Terminal,
-            defaultSize = Size(560f, 360f),
+            defaultSize = Size(480f, 320f),
         )
 
     val settings =
@@ -33,7 +33,7 @@ object AppRegistry {
             "settings",
             "Settings",
             Icons.Filled.Settings,
-            defaultSize = Size(520f, 420f),
+            defaultSize = Size(440f, 400f),
         )
 
     val softwareCenter =
@@ -41,7 +41,7 @@ object AppRegistry {
             "software_center",
             "Software Center",
             Icons.Filled.Widgets,
-            defaultSize = Size(600f, 420f),
+            defaultSize = Size(500f, 380f),
         )
 
     val browser =
@@ -49,7 +49,8 @@ object AppRegistry {
             "browser",
             "Browser",
             Icons.Filled.Language,
-            defaultSize = Size(900f, 620f),
+            // Compacto e centrado no telemóvel (WindowManager limita a 92% do desktop)
+            defaultSize = Size(420f, 520f),
         )
 
     val mediaPlayer =
@@ -57,7 +58,7 @@ object AppRegistry {
             "media_player",
             "MediaPlayerOS",
             Icons.Filled.Headphones,
-            defaultSize = Size(900f, 560f),
+            defaultSize = Size(520f, 420f),
         )
 
     val smartPlay =
@@ -65,7 +66,7 @@ object AppRegistry {
             "smartplay",
             "SmartPlay",
             Icons.Filled.Language,
-            defaultSize = Size(900f, 620f),
+            defaultSize = Size(480f, 400f),
         )
 
     val all =
@@ -80,7 +81,5 @@ object AppRegistry {
         )
 
     fun byId(id: String): MiniApp? =
-        all.firstOrNull {
-            it.id == id
-        }
+        all.firstOrNull { it.id == id }
 }
