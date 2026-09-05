@@ -34,7 +34,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.rememberAsyncImagePainter
+import coil.compose.AsyncImage
 import com.minios.elizierdias.apps.AppRegistry
 import com.minios.elizierdias.apps.browser.BrowserApp
 import com.minios.elizierdias.apps.files.FilesApp
@@ -45,7 +45,6 @@ import com.minios.elizierdias.apps.softwarecenter.SoftwareCenterApp
 import com.minios.elizierdias.apps.terminal.TerminalApp
 import com.minios.elizierdias.core.MiniApp
 import com.minios.elizierdias.core.MiniOSConfig
-import com.minios.elizierdias.personalization.AnimatedWallpaper
 import com.minios.elizierdias.personalization.VideoWallpaper
 import com.minios.elizierdias.personalization.Wallpapers
 import com.minios.elizierdias.shell.mouse.VirtualMouse
@@ -53,6 +52,7 @@ import com.minios.elizierdias.shell.startmenu.StartMenu
 import com.minios.elizierdias.shell.taskbar.Taskbar
 import com.minios.elizierdias.window.frame.WindowFrame
 import com.minios.elizierdias.window.manager.WindowManager
+import java.io.File
 
 private val TaskbarHeight = 44.dp
 
@@ -71,7 +71,6 @@ fun Desktop() {
     var mouseEnabled by remember { mutableStateOf(false) }
     var desktopSizePx by remember { mutableStateOf(Size(1280f, 676f)) }
 
-    // Mantém o WindowManager a par da área útil (acima da taskbar)
     LaunchedEffect(desktopSizePx) {
         windowManager.updateDesktopSize(desktopSizePx)
     }
@@ -89,29 +88,35 @@ fun Desktop() {
     val isGifWallpaper = wallpaperUri.endsWith(".gif", ignoreCase = true)
     val isVideoWallpaper = isVideoPath(wallpaperUri)
 
+    // Modelo Coil: path local → File, senão string URI
+    val wallpaperModel: Any? = remember(wallpaperUri) {
+        when {
+            wallpaperUri.isBlank() -> null
+            wallpaperUri.startsWith("/") -> File(wallpaperUri)
+            else -> wallpaperUri
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        //
-        // VIEWPORT RÍGIDO DO WALLPAPER + ÍCONES + JANELAS
-        // clipToBounds: vídeo/GIF/imagem NUNCA atravessam a taskbar
-        //
+        /*
+         * VIEWPORT RÍGIDO — wallpaper + ícones + janelas
+         * clipToBounds: nada ultrapassa para a taskbar
+         * ContentScale.Crop / ZOOM: preenche sem barras, corta excesso, centrado
+         */
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .clipToBounds()
                 .onSizeChanged { size ->
-                    desktopSizePx = Size(size.width.toFloat(), size.height.toFloat())
+                    if (size.width > 0 && size.height > 0) {
+                        desktopSizePx = Size(size.width.toFloat(), size.height.toFloat())
+                    }
                 },
         ) {
-            // Camada wallpaper — preenchimento Crop, limitada a este Box
-            Box(Modifier = Modifier.fillMaxSize().clipToBounds()) {
+            // Wallpaper layer (sempre Crop)
+            Box(Modifier.fillMaxSize().clipToBounds()) {
                 when {
-                    isGifWallpaper -> {
-                        AnimatedWallpaper(
-                            source = wallpaperUri,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
                     isVideoWallpaper -> {
                         key(wallpaperUri, wallpaperVideoSound) {
                             VideoWallpaper(
@@ -121,9 +126,10 @@ fun Desktop() {
                             )
                         }
                     }
-                    wallpaperUri.isNotBlank() -> {
-                        Image(
-                            painter = rememberAsyncImagePainter(model = wallpaperUri),
+                    wallpaperModel != null -> {
+                        // JPG/PNG/WebP/GIF via Coil — Crop + GIF animado nativo
+                        AsyncImage(
+                            model = wallpaperModel,
                             contentDescription = "Wallpaper",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
@@ -139,7 +145,6 @@ fun Desktop() {
                 }
             }
 
-            // Ícones
             Column(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -154,7 +159,6 @@ fun Desktop() {
                 }
             }
 
-            // Janelas (já limitadas pelo WindowManager à área deste Box)
             windowManager.windows
                 .sortedBy { it.zIndex }
                 .forEach { window ->
@@ -200,7 +204,6 @@ fun Desktop() {
             )
         }
 
-        // Taskbar fixa — fora do viewport do wallpaper
         Box(
             modifier = Modifier
                 .fillMaxWidth()
