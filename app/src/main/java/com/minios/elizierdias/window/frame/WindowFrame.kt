@@ -32,6 +32,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -49,7 +50,7 @@ fun WindowFrame(
     onToggleMaximize: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    val density = androidx.compose.ui.platform.LocalDensity.current
+    val density = LocalDensity.current
     val windowWidth = with(density) { window.size.width.toDp() }
     val windowHeight = with(density) { window.size.height.toDp() }
 
@@ -76,14 +77,12 @@ fun WindowFrame(
             .background(Color(0xFF161B22)),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Barra de título — arrastar em qualquer zona vazia (ícone + título)
+            // Barra de título: arrastar em qualquer zona vazia (ícone + título)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(36.dp)
-                    .background(
-                        if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128),
-                    )
+                    .background(if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128))
                     .pointerInput(window.instanceId) {
                         detectDragGestures(
                             onDragStart = { onFocus() },
