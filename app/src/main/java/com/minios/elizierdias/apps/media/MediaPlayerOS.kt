@@ -2,13 +2,16 @@ package com.minios.elizierdias.apps.media
 
 import android.content.ContentUris
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Size
 import android.view.ViewGroup
 import android.widget.VideoView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,6 +34,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -43,8 +48,9 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.VideoLibrary
@@ -52,7 +58,8 @@ import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -69,6 +76,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
@@ -78,19 +87,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /* ── VLC dark palette (como nas fotos) ─────────────────────────────── */
-private val Bg = Color(0xFF1E1E1E)
-private val Sidebar = Color(0xFF252525)
-private val Panel = Color(0xFF2A2A2A)
-private val PanelAlt = Color(0xFF323232)
-private val Border = Color(0xFF3C3C3C)
-private val Accent = Color(0xFFFF8800)
-private val TextPrimary = Color(0xFFECECEC)
-private val TextSecondary = Color(0xFF9B9B9B)
-private val SelectedBg = Color(0xFF3A3A3A)
-private val PlaylistSel = Color(0xFF3D6EA5)
+private val Bg = Color(0xFF1A1A1D)
+private val Sidebar = Color(0xFF201F23)
+private val Panel = Color(0xFF242327)
+private val PanelAlt = Color(0xFF2D2C31)
+private val Border = Color(0xFF39383D)
+private val Accent = Color(0xFFFF8A00)
+private val AccentDim = Color(0xFFB35F00)
+private val TextPrimary = Color(0xFFF2F2F2)
+private val TextSecondary = Color(0xFF9C9BA1)
+private val SelectedBg = Color(0xFF34333A)
+private val PlaylistSel = Color(0xFFFF8A00)
 
 private enum class MediaFilter { ALL, AUDIO, VIDEO }
 
@@ -99,6 +111,7 @@ private data class MediaEntry(
     val uri: Uri,
     val title: String,
     val displayName: String,
+    val artist: String?,
     val mimeType: String?,
     val duration: Long,
     val size: Long,
@@ -109,6 +122,7 @@ private val AUDIO_PROJECTION = arrayOf(
     MediaStore.Audio.Media._ID,
     MediaStore.Audio.Media.DISPLAY_NAME,
     MediaStore.Audio.Media.TITLE,
+    MediaStore.Audio.Media.ARTIST,
     MediaStore.Audio.Media.MIME_TYPE,
     MediaStore.Audio.Media.DURATION,
     MediaStore.Audio.Media.SIZE,
@@ -141,6 +155,7 @@ private fun queryAudio(context: Context): List<MediaEntry> {
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
             val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
             val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+            val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
             val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
             val durCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
@@ -148,11 +163,14 @@ private fun queryAudio(context: Context): List<MediaEntry> {
                 val id = cursor.getLong(idCol)
                 val displayName = cursor.getString(nameCol) ?: "Áudio"
                 val title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() } ?: displayName
+                val artist = cursor.getString(artistCol)
+                    ?.takeIf { it.isNotBlank() && !it.equals("<unknown>", ignoreCase = true) }
                 result += MediaEntry(
                     id = id,
                     uri = ContentUris.withAppendedId(collection, id),
                     title = title,
                     displayName = displayName,
+                    artist = artist,
                     mimeType = cursor.getString(mimeCol),
                     duration = cursor.getLong(durCol),
                     size = cursor.getLong(sizeCol),
@@ -195,6 +213,7 @@ private fun queryVideo(context: Context): List<MediaEntry> {
                     uri = ContentUris.withAppendedId(collection, id),
                     title = title,
                     displayName = displayName,
+                    artist = null,
                     mimeType = cursor.getString(mimeCol),
                     duration = cursor.getLong(durCol),
                     size = cursor.getLong(sizeCol),
@@ -222,6 +241,51 @@ private fun formatDuration(ms: Long): String {
     return if (h > 0L) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
+/* ── Miniatura real (capa de álbum / frame de vídeo) com fallback de ícone ── */
+@Composable
+private fun MediaThumbnail(
+    entry: MediaEntry,
+    modifier: Modifier = Modifier,
+    iconSize: androidx.compose.ui.unit.Dp = 28.dp,
+) {
+    val context = LocalContext.current
+    var bitmap by remember(entry.id, entry.isVideo) { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(entry.id, entry.isVideo) {
+        bitmap = null
+        bitmap = withContext(Dispatchers.IO) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    context.contentResolver.loadThumbnail(entry.uri, Size(320, 320), null)
+                } else {
+                    null
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        val bmp = bitmap
+        if (bmp != null) {
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Icon(
+                if (entry.isVideo) Icons.Filled.VideoLibrary else Icons.Filled.MusicNote,
+                null,
+                tint = if (entry.isVideo) Color(0xFF5B9BD5) else Accent,
+                modifier = Modifier.size(iconSize),
+            )
+        }
+    }
+}
+
 @Composable
 fun MediaPlayerOS() {
     val context = LocalContext.current
@@ -236,6 +300,11 @@ fun MediaPlayerOS() {
     var currentDuration by remember { mutableLongStateOf(0L) }
     var volume by remember { mutableFloatStateOf(1f) }
     var showPlaylist by remember { mutableStateOf(true) }
+    var isShuffle by remember { mutableStateOf(false) }
+    var isRepeat by remember { mutableStateOf(false) }
+    var isUserSeeking by remember { mutableStateOf(false) }
+    var seekPreview by remember { mutableFloatStateOf(0f) }
+    var videoViewRef by remember { mutableStateOf<VideoView?>(null) }
 
     val mediaPlayer = remember { MediaPlayer() }
 
@@ -247,6 +316,36 @@ fun MediaPlayerOS() {
             }
             mediaPlayer.release()
         }
+    }
+
+    fun stopAudio() {
+        try {
+            if (mediaPlayer.isPlaying) mediaPlayer.pause()
+        } catch (_: Exception) {
+        }
+        isPlaying = false
+    }
+
+    fun pickNextIndex(fromIndex: Int, isVideo: Boolean): Int? {
+        val candidates = library.indices.filter { library[it].isVideo == isVideo }
+        if (candidates.isEmpty()) return null
+        if (isShuffle) {
+            return candidates.filter { it != fromIndex }.randomOrNull() ?: candidates.firstOrNull()
+        }
+        val pos = candidates.indexOf(fromIndex)
+        val nextPos = if (pos == -1) 0 else pos + 1
+        return candidates.getOrNull(nextPos)
+    }
+
+    fun pickPreviousIndex(fromIndex: Int, isVideo: Boolean): Int? {
+        val candidates = library.indices.filter { library[it].isVideo == isVideo }
+        if (candidates.isEmpty()) return null
+        if (isShuffle) {
+            return candidates.filter { it != fromIndex }.randomOrNull() ?: candidates.firstOrNull()
+        }
+        val pos = candidates.indexOf(fromIndex)
+        val prevPos = if (pos <= 0) -1 else pos - 1
+        return candidates.getOrNull(prevPos)
     }
 
     fun playAudio(entry: MediaEntry) {
@@ -263,9 +362,19 @@ fun MediaPlayerOS() {
                 isPlaying = true
             }
             mediaPlayer.setOnCompletionListener {
+                if (isRepeat) {
+                    try {
+                        it.seekTo(0)
+                        it.start()
+                        isPlaying = true
+                    } catch (_: Exception) {
+                        isPlaying = false
+                    }
+                    return@setOnCompletionListener
+                }
                 isPlaying = false
                 if (selectedIndex >= 0) {
-                    val next = (selectedIndex + 1 until library.size).firstOrNull { !library[it].isVideo }
+                    val next = pickNextIndex(selectedIndex, isVideo = false)
                     if (next != null) {
                         selectedIndex = next
                         playAudio(library[next])
@@ -280,14 +389,6 @@ fun MediaPlayerOS() {
         } catch (_: Exception) {
             isPlaying = false
         }
-    }
-
-    fun stopAudio() {
-        try {
-            if (mediaPlayer.isPlaying) mediaPlayer.pause()
-        } catch (_: Exception) {
-        }
-        isPlaying = false
     }
 
     fun toggleAudio() {
@@ -315,30 +416,43 @@ fun MediaPlayerOS() {
     }
 
     fun previousAudio() {
-        val current = library.getOrNull(selectedIndex) ?: return
-        val index = library.indexOfFirst { !it.isVideo && it.id == current.id }
-        val prev = (index - 1 downTo 0).firstOrNull { !library[it].isVideo }
-        if (prev != null) {
-            selectedIndex = prev
-            playAudio(library[prev])
-        }
+        val prev = pickPreviousIndex(selectedIndex, isVideo = false) ?: return
+        selectedIndex = prev
+        playAudio(library[prev])
     }
 
     fun nextAudio() {
-        val current = library.getOrNull(selectedIndex) ?: return
-        val index = library.indexOfFirst { !it.isVideo && it.id == current.id }
-        val next = (index + 1 until library.size).firstOrNull { !library[it].isVideo }
-        if (next != null) {
-            selectedIndex = next
-            playAudio(library[next])
-        }
+        val next = pickNextIndex(selectedIndex, isVideo = false) ?: return
+        selectedIndex = next
+        playAudio(library[next])
     }
 
     fun seekBy(deltaMs: Int) {
         try {
-            val pos = (mediaPlayer.currentPosition + deltaMs).coerceIn(0, mediaPlayer.duration.coerceAtLeast(0))
-            mediaPlayer.seekTo(pos)
-            currentPosition = pos.toLong()
+            val selectedIsVideo = library.getOrNull(selectedIndex)?.isVideo == true
+            if (selectedIsVideo) {
+                val vv = videoViewRef ?: return
+                val pos = (vv.currentPosition + deltaMs).coerceIn(0, vv.duration.coerceAtLeast(0))
+                vv.seekTo(pos)
+                currentPosition = pos.toLong()
+            } else {
+                val pos = (mediaPlayer.currentPosition + deltaMs).coerceIn(0, mediaPlayer.duration.coerceAtLeast(0))
+                mediaPlayer.seekTo(pos)
+                currentPosition = pos.toLong()
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    fun seekTo(positionMs: Long) {
+        try {
+            val selectedIsVideo = library.getOrNull(selectedIndex)?.isVideo == true
+            if (selectedIsVideo) {
+                videoViewRef?.seekTo(positionMs.toInt())
+            } else {
+                mediaPlayer.seekTo(positionMs.toInt())
+            }
+            currentPosition = positionMs
         } catch (_: Exception) {
         }
     }
@@ -352,10 +466,15 @@ fun MediaPlayerOS() {
         if (entry != null && entry.isVideo) stopAudio()
     }
 
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
+    LaunchedEffect(isPlaying, isUserSeeking) {
+        while (isPlaying && !isUserSeeking) {
             try {
-                currentPosition = mediaPlayer.currentPosition.toLong()
+                val selectedIsVideo = library.getOrNull(selectedIndex)?.isVideo == true
+                currentPosition = if (selectedIsVideo) {
+                    videoViewRef?.currentPosition?.toLong() ?: currentPosition
+                } else {
+                    mediaPlayer.currentPosition.toLong()
+                }
             } catch (_: Exception) {
             }
             delay(400L)
@@ -374,16 +493,21 @@ fun MediaPlayerOS() {
         .filter {
             q.isEmpty() ||
                 it.title.lowercase().contains(q) ||
-                it.displayName.lowercase().contains(q)
+                it.displayName.lowercase().contains(q) ||
+                (it.artist?.lowercase()?.contains(q) == true)
         }
         .toList()
 
     val selected = library.getOrNull(selectedIndex)
-    val progress = if (currentDuration > 0L) {
-        (currentPosition.toFloat() / currentDuration.toFloat()).coerceIn(0f, 1f)
+    val effectiveDuration = if (selected != null && selected.duration > 0) selected.duration else currentDuration
+    val progress = if (isUserSeeking) {
+        seekPreview
+    } else if (effectiveDuration > 0L) {
+        (currentPosition.toFloat() / effectiveDuration.toFloat()).coerceIn(0f, 1f)
     } else {
         0f
     }
+    val previewPositionMs = (progress * effectiveDuration).toLong()
 
     Column(
         modifier = Modifier
@@ -399,20 +523,47 @@ fun MediaPlayerOS() {
             /* Sidebar esquerda (estilo VLC) */
             Column(
                 modifier = Modifier
-                    .width(132.dp)
+                    .width(140.dp)
                     .fillMaxHeight()
                     .background(Sidebar)
-                    .padding(vertical = 8.dp),
+                    .padding(vertical = 10.dp),
             ) {
-                Text(
-                    text = "MediaPlayerOS",
-                    color = Accent,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(Accent),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            null,
+                            tint = Color.White,
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "MediaPlayerOS",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    text = "BIBLIOTECA",
+                    color = TextSecondary,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                )
 
                 SidebarItem(
                     label = "Música",
@@ -427,7 +578,7 @@ fun MediaPlayerOS() {
                     onClick = { filter = MediaFilter.VIDEO },
                 )
                 SidebarItem(
-                    label = "Todos",
+                    label = "Tudo",
                     icon = Icons.Filled.PlaylistPlay,
                     selected = filter == MediaFilter.ALL,
                     onClick = { filter = MediaFilter.ALL },
@@ -454,16 +605,16 @@ fun MediaPlayerOS() {
                     .fillMaxHeight()
                     .background(Bg),
             ) {
-                /* Barra de pesquisa compacta */
+                /* Barra de pesquisa */
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp)
-                        .height(32.dp)
-                        .clip(RoundedCornerShape(4.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(PanelAlt)
-                        .border(1.dp, Border, RoundedCornerShape(4.dp))
-                        .padding(horizontal = 8.dp),
+                        .border(1.dp, Border, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(Icons.Filled.Search, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
@@ -479,7 +630,7 @@ fun MediaPlayerOS() {
                         modifier = Modifier.weight(1f),
                         decorationBox = { inner ->
                             if (searchQuery.isEmpty()) {
-                                Text("Procurar…", color = TextSecondary, fontSize = 12.sp)
+                                Text("Procurar músicas, vídeos, artistas…", color = TextSecondary, fontSize = 12.sp)
                             }
                             inner()
                         },
@@ -496,24 +647,38 @@ fun MediaPlayerOS() {
                     }
                 }
 
-                Text(
-                    text = when (filter) {
-                        MediaFilter.AUDIO -> "Songs"
-                        MediaFilter.VIDEO -> "Videos"
-                        MediaFilter.ALL -> "Library"
-                    },
-                    color = TextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = when (filter) {
+                            MediaFilter.AUDIO -> "Músicas"
+                            MediaFilter.VIDEO -> "Vídeos"
+                            MediaFilter.ALL -> "Biblioteca"
+                        },
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = "${visibleLibrary.size} itens",
+                        color = TextSecondary,
+                        fontSize = 11.sp,
+                    )
+                }
 
-                /* Conteúdo: grelha estilo álbum OU vídeo */
+                Spacer(Modifier.height(4.dp))
+
+                /* Conteúdo: grelha de capas OU vídeo em reprodução */
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp),
+                        .padding(horizontal = 10.dp),
                 ) {
                     if (selected != null && selected.isVideo) {
                         AndroidView(
@@ -528,24 +693,35 @@ fun MediaPlayerOS() {
                                         mp.start()
                                         isPlaying = true
                                     }
-                                    setOnCompletionListener { isPlaying = false }
+                                    setOnCompletionListener {
+                                        if (isRepeat) {
+                                            seekTo(0)
+                                            start()
+                                            isPlaying = true
+                                        } else {
+                                            isPlaying = false
+                                            val next = pickNextIndex(selectedIndex, isVideo = true)
+                                            if (next != null) {
+                                                selectedIndex = next
+                                            }
+                                        }
+                                    }
                                     setVideoURI(selected.uri)
+                                    videoViewRef = this
                                     start()
                                 }
                             },
-                            update = { vv ->
-                                // se mudou de vídeo, o key no parent deve recriar
-                            },
+                            update = { /* recriado via key no LazyColumn/parent quando muda o vídeo */ },
                             modifier = Modifier
                                 .fillMaxSize()
-                                .clip(RoundedCornerShape(4.dp))
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(Color.Black),
                         )
                     } else if (filter == MediaFilter.AUDIO || filter == MediaFilter.ALL) {
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 100.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            columns = GridCells.Adaptive(minSize = 118.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.fillMaxSize(),
                         ) {
                             items(visibleLibrary.filter { !it.isVideo || filter == MediaFilter.ALL }, key = { "${it.id}_${it.isVideo}" }) { entry ->
@@ -564,7 +740,10 @@ fun MediaPlayerOS() {
                             }
                         }
                     } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
                             items(visibleLibrary, key = { "${it.id}_${it.isVideo}" }) { entry ->
                                 val realIndex = library.indexOfFirst {
                                     it.id == entry.id && it.isVideo == entry.isVideo
@@ -573,6 +752,7 @@ fun MediaPlayerOS() {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
                                         .background(if (isSelected) SelectedBg else Color.Transparent)
                                         .clickable {
                                             selectedIndex = realIndex
@@ -581,12 +761,14 @@ fun MediaPlayerOS() {
                                         .padding(horizontal = 8.dp, vertical = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Icon(
-                                        Icons.Filled.VideoLibrary,
-                                        null,
-                                        tint = Color(0xFF5B9BD5),
-                                        modifier = Modifier.size(18.dp),
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .clip(RoundedCornerShape(5.dp))
+                                            .background(PanelAlt),
+                                    ) {
+                                        MediaThumbnail(entry = entry, modifier = Modifier.fillMaxSize(), iconSize = 18.dp)
+                                    }
                                     Spacer(Modifier.width(8.dp))
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
@@ -606,6 +788,27 @@ fun MediaPlayerOS() {
                             }
                         }
                     }
+
+                    if (visibleLibrary.isEmpty() && (selected == null || !selected.isVideo)) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Icon(
+                                Icons.Filled.MusicNote,
+                                null,
+                                tint = TextSecondary,
+                                modifier = Modifier.size(36.dp),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = if (q.isNotEmpty()) "Sem resultados para \"$searchQuery\"" else "Nada encontrado nesta biblioteca",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
                 }
             }
 
@@ -613,16 +816,16 @@ fun MediaPlayerOS() {
             if (showPlaylist) {
                 Column(
                     modifier = Modifier
-                        .width(168.dp)
+                        .width(176.dp)
                         .fillMaxHeight()
                         .background(Panel)
-                        .border(1.dp, Border),
+                        .border(width = 1.dp, color = Border),
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(PanelAlt)
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
@@ -648,33 +851,52 @@ fun MediaPlayerOS() {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(if (isSelected) PlaylistSel else Color.Transparent)
+                                    .background(
+                                        if (isSelected) PlaylistSel.copy(alpha = 0.18f) else Color.Transparent,
+                                    )
+                                    .border(
+                                        width = if (isSelected) 1.dp else 0.dp,
+                                        color = if (isSelected) PlaylistSel else Color.Transparent,
+                                    )
                                     .clickable {
                                         selectedIndex = realIndex
                                         if (entry.isVideo) stopAudio() else playAudio(entry)
                                     }
-                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Icon(
-                                    if (entry.isVideo) Icons.Filled.VideoLibrary else Icons.Filled.MusicNote,
-                                    null,
-                                    tint = if (isSelected) Color.White else if (entry.isVideo) Color(0xFF5B9BD5) else Accent,
-                                    modifier = Modifier.size(14.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(PanelAlt),
+                                ) {
+                                    MediaThumbnail(entry = entry, modifier = Modifier.fillMaxSize(), iconSize = 14.dp)
+                                }
+                                Spacer(Modifier.width(7.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         entry.title,
-                                        color = if (isSelected) Color.White else TextPrimary,
+                                        color = if (isSelected) Accent else TextPrimary,
                                         fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     Text(
-                                        formatDuration(entry.duration),
-                                        color = if (isSelected) Color(0xFFCCDDFF) else TextSecondary,
+                                        entry.artist ?: formatDuration(entry.duration),
+                                        color = TextSecondary,
                                         fontSize = 9.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                if (isSelected && isPlaying) {
+                                    Icon(
+                                        Icons.Filled.Pause,
+                                        null,
+                                        tint = Accent,
+                                        modifier = Modifier.size(12.dp),
                                     )
                                 }
                             }
@@ -684,228 +906,4 @@ fun MediaPlayerOS() {
             }
         }
 
-        /* ── Barra de player inferior (estilo VLC) ──────────────────── */
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Panel)
-                .border(width = 1.dp, color = Border)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                /* Cover placeholder */
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(PanelAlt),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        if (selected?.isVideo == true) Icons.Filled.VideoLibrary else Icons.Filled.MusicNote,
-                        null,
-                        tint = Accent,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
-
-                Spacer(Modifier.width(8.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = selected?.title ?: "Nada a reproduzir",
-                        color = TextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = selected?.displayName ?: "—",
-                        color = TextSecondary,
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                /* Controlos */
-                IconButton(onClick = { previousAudio() }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Filled.SkipPrevious, null, tint = TextPrimary, modifier = Modifier.size(18.dp))
-                }
-                IconButton(onClick = { seekBy(-10_000) }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Filled.FastRewind, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-                }
-                IconButton(
-                    onClick = {
-                        if (selected?.isVideo == true) {
-                            // vídeo controlado pelo VideoView — toggle via isPlaying flag só visual
-                            isPlaying = !isPlaying
-                        } else {
-                            toggleAudio()
-                        }
-                    },
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        null,
-                        tint = Accent,
-                        modifier = Modifier.size(26.dp),
-                    )
-                }
-                IconButton(onClick = { seekBy(10_000) }, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Filled.FastForward, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-                }
-                IconButton(onClick = { nextAudio() }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Filled.SkipNext, null, tint = TextPrimary, modifier = Modifier.size(18.dp))
-                }
-
-                Spacer(Modifier.width(8.dp))
-
-                IconButton(
-                    onClick = {
-                        volume = (volume - 0.1f).coerceAtLeast(0f)
-                        try {
-                            mediaPlayer.setVolume(volume, volume)
-                        } catch (_: Exception) {
-                        }
-                    },
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Icon(Icons.Filled.VolumeDown, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-                }
-                Text(
-                    "${(volume * 100).toInt()}%",
-                    color = TextSecondary,
-                    fontSize = 10.sp,
-                    modifier = Modifier.width(28.dp),
-                )
-                IconButton(
-                    onClick = {
-                        volume = (volume + 0.1f).coerceAtMost(1f)
-                        try {
-                            mediaPlayer.setVolume(volume, volume)
-                        } catch (_: Exception) {
-                        }
-                    },
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Icon(Icons.Filled.VolumeUp, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-                }
-
-                IconButton(
-                    onClick = { showPlaylist = !showPlaylist },
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Icon(Icons.Filled.PlaylistPlay, null, tint = if (showPlaylist) Accent else TextSecondary, modifier = Modifier.size(16.dp))
-                }
-            }
-
-            Spacer(Modifier.height(4.dp))
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(formatDuration(currentPosition), color = TextSecondary, fontSize = 10.sp, modifier = Modifier.width(40.dp))
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(2.dp)),
-                    color = Accent,
-                    trackColor = Border,
-                )
-                Text(
-                    formatDuration(if (selected != null && selected.duration > 0) selected.duration else currentDuration),
-                    color = TextSecondary,
-                    fontSize = 10.sp,
-                    modifier = Modifier
-                        .width(40.dp)
-                        .padding(start = 4.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SidebarItem(
-    label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(if (selected) SelectedBg else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            icon,
-            null,
-            tint = if (selected) Accent else TextSecondary,
-            modifier = Modifier.size(16.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            label,
-            color = if (selected) TextPrimary else TextSecondary,
-            fontSize = 12.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        )
-    }
-}
-
-@Composable
-private fun AlbumCard(
-    entry: MediaEntry,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(if (selected) SelectedBg else Panel)
-            .border(1.dp, if (selected) Accent else Border, RoundedCornerShape(4.dp))
-            .clickable(onClick = onClick)
-            .padding(6.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(72.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(PanelAlt),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                if (entry.isVideo) Icons.Filled.VideoLibrary else Icons.Filled.MusicNote,
-                null,
-                tint = if (entry.isVideo) Color(0xFF5B9BD5) else Accent,
-                modifier = Modifier.size(28.dp),
-            )
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            entry.title,
-            color = TextPrimary,
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            formatDuration(entry.duration),
-            color = TextSecondary,
-            fontSize = 9.sp,
-        )
-    }
-}
+        
