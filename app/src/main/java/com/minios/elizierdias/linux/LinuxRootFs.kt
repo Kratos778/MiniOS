@@ -82,16 +82,107 @@ class LinuxRootFs(
         }
     }
 
+    /**
+     * Accepts real dirs, files, or symlinks that exist on disk (even if target is relative).
+     */
+    private fun pathExists(root: File, rel: String): Boolean {
+        val f = File(root, rel)
+        if (f.exists()) return true
+        return try {
+            Files.exists(f.toPath()) || Files.isSymbolicLink(f.toPath())
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun validateRootFs(root: File): Boolean {
         if (!root.isDirectory) return false
-        val requiredDirs = listOf("root", "etc", "usr", "bin")
-        if (requiredDirs.any { !File(root, it).exists() }) return false
-        val bash = File(root, "bin/bash")
-        val sh = File(root, "bin/sh")
-        val usrBash = File(root, "usr/bin/bash")
-        val usrSh = File(root, "usr/bin/sh")
-        if (!bash.exists() && !sh.exists() && !usrBash.exists() && !usrSh.exists()) return false
-        return true
+        val hasEtc = pathExists(root, "etc")
+        val hasUsr = pathExists(root, "usr")
+        val hasBin = pathExists(root, "bin") || pathExists(root, "usr/bin")
+        val hasShell =
+            pathExists(root, "bin/bash") ||
+                pathExists(root, "bin/sh") ||
+                pathExists(root, "usr/bin/bash") ||
+                pathExists(root, "usr/bin/sh")
+        val hasRootHome = pathExists(root, "root")
+        return hasEtc && hasUsr && hasBin && hasShell && hasRootHome
+    }
+
+    private fun describeValidation(root: File): String = buildString {
+        appendLine("root: ${root.absolutePath}")
+        listOf("bin", "etc", "usr", "root", "bin/bash", "bin/sh", "usr/bin/bash", "usr/bin/sh").forEach { rel ->
+            val f = File(root, rel)
+            val symlink = try {
+                Files.isSymbolicLink(f.toPath())
+            } catch (_: Exception) {
+                false
+            }
+            appendLine("$rel: exists=${f.exists()} symlink=$symlink")
+        }
+        val children = root.list()?.take(20)?.joinToString() ?: "(empty)"
+        appendLine("children: $children")
+    }
+
+    /**
+     * proot-distro packs: debian-bookworm-aarch64/{bin,etc,usr,...}
+     * Hoist that single top-level directory to the staging root.
+     */
+    private fun unwrapNestedRootFs(staging: File, onProgress: ProgressListener?) {
+        // Already valid at top level
+        if (validateRootFs(staging)) return
+
+        val children = staging.listFiles()?.filter {
+            it.name != "." && it.name != ".." && !it.name.startsWith(".minios")
+        } ?: return
+
+        // Case 1: single directory prefix (proot-distro)
+        if (children.size == 1 && children[0].isDirectory) {
+            val nested = children[0]
+            if (validateRootFs(nested) || pathExists(nested, "etc") || pathExists(nested, "usr")) {
+                onProgress?.onProgress("Unpacking nested root: ${nested.name}/ → /")
+                hoistDirectory(nested, staging)
+                return
+            }
+        }
+
+        // Case 2: find a child that looks like a rootfs
+        for (child in children) {
+            if (!child.isDirectory) continue
+            if (pathExists(child, "etc") && pathExists(child, "usr")) {
+                onProgress?.onProgress("Unpacking nested root: ${child.name}/ → /")
+                hoistDirectory(child, staging)
+                return
+            }
+        }
+    }
+
+    private fun hoistDirectory(from: File, to: File) {
+        from.listFiles()?.forEach { child ->
+            val dest = File(to, child.name)
+            if (dest.exists()) {
+                dest.deleteRecursively()
+            }
+            val moved = child.renameTo(dest)
+            if (!moved) {
+                if (Files.isSymbolicLink(child.toPath())) {
+                    val target = Files.readSymbolicLink(child.toPath()).toString()
+                    createSymlink(dest, target)
+                } else if (child.isDirectory) {
+                    copyDirectory(child, dest)
+                    child.deleteRecursively()
+                } else {
+                    child.copyTo(dest, overwrite = true)
+                    child.delete()
+                }
+            }
+        }
+        from.deleteRecursively()
+    }
+
+    private fun ensureRootHome(root: File) {
+        val home = File(root, "root")
+        if (!home.exists()) home.mkdirs()
     }
 
     suspend fun markInstalled(distro: String = LinuxConfig.DEFAULT_DISTRO): Result<Unit> =
@@ -101,7 +192,7 @@ class LinuxRootFs(
                 val root = LinuxConfig.rootfsDir(context)
                 if (!validateRootFs(root)) {
                     return@withContext Result.failure(
-                        IllegalStateException("RootFS validation failed."),
+                        IllegalStateException("RootFS validation failed.\n${describeValidation(root)}"),
                     )
                 }
                 LinuxConfig.installedMarker(context).writeText(distro)
@@ -124,6 +215,9 @@ class LinuxRootFs(
         try {
             LinuxConfig.rootfsDir(context).deleteRecursively()
             LinuxConfig.rootfsDir(context).mkdirs()
+            // also wipe failed staging
+            File(LinuxConfig.runtimeDir(context), "${LinuxConfig.ROOTFS_DIR_NAME}.staging")
+                .deleteRecursively()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -206,16 +300,16 @@ class LinuxRootFs(
                 onProgress?.onProgress("Extracting rootfs (symlinks + modes)...")
                 extractTarXz(tarball, staging, onProgress).getOrThrow()
 
-                val stagedRoot = File(staging, "root")
-                if (!stagedRoot.exists()) {
-                    onProgress?.onProgress("Creating /root...")
-                    stagedRoot.mkdirs()
-                }
+                // CRITICAL: proot-distro uses debian-bookworm-aarch64/ prefix
+                onProgress?.onProgress("Normalizing RootFS layout...")
+                unwrapNestedRootFs(staging, onProgress)
+                ensureRootHome(staging)
 
                 if (!validateRootFs(staging)) {
+                    val detail = describeValidation(staging)
                     staging.deleteRecursively()
                     throw IllegalStateException(
-                        "Extracted RootFS invalid (need /root /bin /etc /usr + shell).",
+                        "Extracted RootFS invalid.\n$detail",
                     )
                 }
 
@@ -229,8 +323,9 @@ class LinuxRootFs(
                 }
 
                 if (!validateRootFs(rootfs)) {
+                    val detail = describeValidation(rootfs)
                     rootfs.deleteRecursively()
-                    throw IllegalStateException("Final RootFS validation failed.")
+                    throw IllegalStateException("Final RootFS validation failed.\n$detail")
                 }
 
                 LinuxConfig.installedMarker(context).writeText(LinuxConfig.DEFAULT_DISTRO)
@@ -377,8 +472,10 @@ class LinuxRootFs(
                 try {
                     Files.createLink(outFile.toPath(), target.toPath())
                 } catch (_: Exception) {
-                    // Android FS may not support hard links — copy instead
-                    target.copyTo(outFile, overwrite = true)
+                    try {
+                        target.copyTo(outFile, overwrite = true)
+                    } catch (_: Exception) {
+                    }
                 }
             }
 
@@ -392,7 +489,6 @@ class LinuxRootFs(
     }
 
     private fun createSymlink(linkFile: File, target: String) {
-        // Prefer Android Os.symlink; fall back to NIO
         try {
             Os.symlink(target, linkFile.absolutePath)
             return
