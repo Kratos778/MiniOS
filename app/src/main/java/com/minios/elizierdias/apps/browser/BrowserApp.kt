@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) 2026 Elizier Layerti Gungui Dias
+ * MiniOS - Desktop-style environment for Android
+ *
+ * PROPRIETARY SOFTWARE — All Rights Reserved.
+ */
+
 package com.minios.elizierdias.apps.browser
 
 import android.annotation.SuppressLint
@@ -20,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -44,8 +52,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,19 +68,21 @@ private data class BrowserTab(
     val title: String,
 )
 
+private val ChromeBg = Color(0xFF202124)
+private val TabActive = Color(0xFF303134)
+private val TabInactive = Color(0xFF202124)
+private val AddressBg = Color(0xFF303134)
+private val TextPrimary = Color(0xFFE8EAED)
+private val TextMuted = Color(0xFF9AA0A6)
+
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserApp() {
-
     val context = LocalContext.current
 
     val tabs = remember {
         mutableStateListOf(
-            BrowserTab(
-                id = 0,
-                url = "https://www.google.com",
-                title = "Nova aba",
-            ),
+            BrowserTab(0, "https://www.google.com", "Nova aba"),
         )
     }
 
@@ -81,15 +93,11 @@ fun BrowserApp() {
     val selectedIndex = tabs.indexOfFirst { it.id == selectedTabId }.coerceAtLeast(0)
     val selectedTab = tabs.getOrNull(selectedIndex) ?: tabs.first()
 
-    fun fitPage(view: WebView) {
-        val w = view.width.coerceAtLeast(1)
-        // Escala para caber a largura “desktop” na janela real
-        val scale = ((w * 100) / 1100).coerceIn(30, 100)
-        view.setInitialScale(scale)
+    fun applyDesktopViewport(view: WebView) {
+        // Pedir layout desktop e zoom razoável (evita sites “gigantes”)
         view.evaluateJavascript(
             """
             (function() {
-              var vw = Math.max(document.documentElement.clientWidth || 0, $w);
               var meta = document.querySelector('meta[name=viewport]');
               if (!meta) {
                 meta = document.createElement('meta');
@@ -97,9 +105,8 @@ fun BrowserApp() {
                 document.head.appendChild(meta);
               }
               meta.setAttribute('content',
-                'width=' + vw +
-                ', initial-scale=1.0, maximum-scale=5.0, user-scalable=yes');
-              document.documentElement.style.zoom = '1';
+                'width=1280, initial-scale=0.85, maximum-scale=3.0, user-scalable=yes');
+              try { document.documentElement.style.zoom = '0.9'; } catch(e) {}
             })();
             """.trimIndent(),
             null,
@@ -109,29 +116,28 @@ fun BrowserApp() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D1117)),
+            .background(ChromeBg),
     ) {
-
+        // —— Abas (estilo Chrome)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(38.dp)
-                .background(Color(0xFF161B22)),
+                .height(36.dp)
+                .background(ChromeBg),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             LazyRow(
                 modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 items(items = tabs, key = { it.id }) { tab ->
+                    val active = tab.id == selectedTabId
                     Row(
                         modifier = Modifier
                             .height(32.dp)
-                            .width(150.dp)
-                            .background(
-                                if (tab.id == selectedTabId) Color(0xFF21262D) else Color(0xFF161B22),
-                                RoundedCornerShape(topStart = 7.dp, topEnd = 7.dp),
-                            )
+                            .width(160.dp)
+                            .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                            .background(if (active) TabActive else TabInactive)
                             .clickable {
                                 selectedTabId = tab.id
                                 addressText = tab.url
@@ -142,7 +148,7 @@ fun BrowserApp() {
                         Text(
                             text = tab.title.ifBlank { "Nova aba" },
                             modifier = Modifier.weight(1f),
-                            color = Color(0xFFD0D7DE),
+                            color = if (active) TextPrimary else TextMuted,
                             fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -153,6 +159,7 @@ fun BrowserApp() {
                                     tabs[0] = BrowserTab(0, "https://www.google.com", "Nova aba")
                                     selectedTabId = 0
                                     addressText = "https://www.google.com"
+                                    webView?.loadUrl("https://www.google.com")
                                 } else {
                                     val index = tabs.indexOfFirst { it.id == tab.id }
                                     tabs.removeAll { it.id == tab.id }
@@ -163,9 +170,14 @@ fun BrowserApp() {
                                     }
                                 }
                             },
-                            modifier = Modifier.width(30.dp).height(30.dp),
+                            modifier = Modifier.size(28.dp),
                         ) {
-                            Icon(Icons.Filled.Close, "Fechar", tint = Color(0xFF8B949E))
+                            Icon(
+                                Icons.Filled.Close,
+                                "Fechar",
+                                tint = TextMuted,
+                                modifier = Modifier.size(14.dp),
+                            )
                         }
                     }
                 }
@@ -178,47 +190,49 @@ fun BrowserApp() {
                     selectedTabId = newId
                     addressText = "https://www.google.com"
                 },
-                modifier = Modifier.width(38.dp).height(38.dp),
+                modifier = Modifier.size(36.dp),
             ) {
-                Icon(Icons.Filled.Add, "Nova aba", tint = Color(0xFFC9D1D9))
+                Icon(Icons.Filled.Add, "Nova aba", tint = TextPrimary, modifier = Modifier.size(18.dp))
             }
         }
 
+        // —— Barra de endereço compacta
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(46.dp)
-                .background(Color(0xFF0D1117))
-                .padding(horizontal = 6.dp, vertical = 5.dp),
+                .height(40.dp)
+                .background(TabActive)
+                .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
                 onClick = { webView?.takeIf { it.canGoBack() }?.goBack() },
-                modifier = Modifier.width(36.dp).height(36.dp),
+                modifier = Modifier.size(34.dp),
             ) {
-                Icon(Icons.Filled.ArrowBack, "Voltar", tint = Color(0xFFC9D1D9))
+                Icon(Icons.Filled.ArrowBack, "Voltar", tint = TextPrimary, modifier = Modifier.size(18.dp))
             }
             IconButton(
                 onClick = { webView?.takeIf { it.canGoForward() }?.goForward() },
-                modifier = Modifier.width(36.dp).height(36.dp),
+                modifier = Modifier.size(34.dp),
             ) {
-                Icon(Icons.Filled.ArrowForward, "Avançar", tint = Color(0xFFC9D1D9))
+                Icon(Icons.Filled.ArrowForward, "Avançar", tint = TextPrimary, modifier = Modifier.size(18.dp))
             }
             IconButton(
                 onClick = { webView?.reload() },
-                modifier = Modifier.width(36.dp).height(36.dp),
+                modifier = Modifier.size(34.dp),
             ) {
-                Icon(Icons.Filled.Refresh, "Recarregar", tint = Color(0xFFC9D1D9))
+                Icon(Icons.Filled.Refresh, "Recarregar", tint = TextPrimary, modifier = Modifier.size(18.dp))
             }
 
-            Spacer(modifier = Modifier.width(5.dp))
+            Spacer(modifier = Modifier.width(4.dp))
 
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(34.dp)
-                    .background(Color(0xFF161B22), RoundedCornerShape(17.dp))
-                    .padding(horizontal = 14.dp),
+                    .height(30.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(AddressBg)
+                    .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 androidx.compose.foundation.text.BasicTextField(
@@ -226,24 +240,15 @@ fun BrowserApp() {
                     onValueChange = { addressText = it },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = androidx.compose.ui.text.TextStyle(
-                        color = Color(0xFFC9D1D9),
-                        fontSize = 12.sp,
-                    ),
+                    textStyle = TextStyle(color = TextPrimary, fontSize = 13.sp),
                     decorationBox = { inner ->
                         if (addressText.isEmpty()) {
-                            Text(
-                                "Pesquisar ou introduzir endereço",
-                                color = Color(0xFF6E7681),
-                                fontSize = 12.sp,
-                            )
+                            Text("Pesquisar ou escrever um URL", color = TextMuted, fontSize = 13.sp)
                         }
                         inner()
                     },
                 )
             }
-
-            Spacer(modifier = Modifier.width(4.dp))
 
             IconButton(
                 onClick = {
@@ -253,9 +258,9 @@ fun BrowserApp() {
                         tabs[selectedIndex] = tabs[selectedIndex].copy(url = target)
                     }
                 },
-                modifier = Modifier.width(38.dp).height(36.dp),
+                modifier = Modifier.size(34.dp),
             ) {
-                Icon(Icons.Filled.Search, "Abrir", tint = Color(0xFFC9D1D9))
+                Icon(Icons.Filled.Search, "Ir", tint = TextPrimary, modifier = Modifier.size(18.dp))
             }
         }
 
@@ -286,15 +291,16 @@ fun BrowserApp() {
                             builtInZoomControls = true
                             displayZoomControls = false
 
-                            // Texto mais compacto dentro da janela
-                            textZoom = 55
-                            defaultFontSize = 12
-                            minimumFontSize = 8
+                            // Escala tipo PC — não “gigante”
+                            textZoom = 85
+                            defaultFontSize = 14
+                            minimumFontSize = 10
 
+                            // User-Agent desktop Chrome (sites servem layout PC)
                             userAgentString =
-                                "Mozilla/5.0 (Linux; Android 13; Tablet) " +
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                                     "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                                    "Chrome/121.0.0.0 Safari/537.36"
+                                    "Chrome/122.0.0.0 Safari/537.36"
 
                             allowFileAccess = false
                             allowContentAccess = true
@@ -324,7 +330,7 @@ fun BrowserApp() {
 
                             override fun onPageFinished(view: WebView, url: String?) {
                                 super.onPageFinished(view, url)
-                                fitPage(view)
+                                applyDesktopViewport(view)
                                 if (selectedIndex !in tabs.indices) return
                                 val title = view.title?.takeIf { it.isNotBlank() } ?: "Página"
                                 tabs[selectedIndex] = tabs[selectedIndex].copy(
@@ -343,7 +349,6 @@ fun BrowserApp() {
                     if (view.url != selectedTab.url && selectedTab.url.isNotBlank()) {
                         view.loadUrl(selectedTab.url)
                     }
-                    if (view.width > 0) fitPage(view)
                     webView = view
                 },
             )

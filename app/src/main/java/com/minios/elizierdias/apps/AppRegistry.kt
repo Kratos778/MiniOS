@@ -17,7 +17,7 @@ object AppRegistry {
             "files",
             "Files",
             Icons.Filled.Folder,
-            defaultSize = Size(480f, 360f),
+            defaultSize = Size(520f, 400f),
         )
 
     val terminal =
@@ -25,7 +25,7 @@ object AppRegistry {
             "terminal",
             "Terminal",
             Icons.Filled.Terminal,
-            defaultSize = Size(480f, 320f),
+            defaultSize = Size(520f, 360f),
         )
 
     val settings =
@@ -33,7 +33,7 @@ object AppRegistry {
             "settings",
             "Settings",
             Icons.Filled.Settings,
-            defaultSize = Size(440f, 400f),
+            defaultSize = Size(560f, 420f),
         )
 
     val softwareCenter =
@@ -41,7 +41,7 @@ object AppRegistry {
             "software_center",
             "Software Center",
             Icons.Filled.Widgets,
-            defaultSize = Size(500f, 380f),
+            defaultSize = Size(540f, 400f),
         )
 
     val browser =
@@ -49,8 +49,8 @@ object AppRegistry {
             "browser",
             "Browser",
             Icons.Filled.Language,
-            // Compacto e centrado no telemóvel (WindowManager limita a 92% do desktop)
-            defaultSize = Size(420f, 520f),
+            // Mais largo tipo PC; o WindowManager limita a ~92% do ecrã
+            defaultSize = Size(720f, 520f),
         )
 
     val mediaPlayer =
@@ -58,7 +58,7 @@ object AppRegistry {
             "media_player",
             "MediaPlayerOS",
             Icons.Filled.Headphones,
-            defaultSize = Size(520f, 420f),
+            defaultSize = Size(560f, 420f),
         )
 
     val smartPlay =
@@ -66,7 +66,7 @@ object AppRegistry {
             "smartplay",
             "SmartPlay",
             Icons.Filled.Language,
-            defaultSize = Size(480f, 400f),
+            defaultSize = Size(520f, 400f),
         )
 
     val all =
