@@ -11,8 +11,8 @@ android {
         applicationId = "com.minios.elizierdias"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3.7"
+        versionCode = 4
+        versionName = "0.3.8"
         vectorDrawables { useSupportLibrary = true }
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -21,11 +21,16 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
         debug {
             applicationIdSuffix = ".debug"
+            // debug mantém símbolos; performance real mede-se em release
         }
     }
 
@@ -39,13 +44,11 @@ android {
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
         jniLibs {
-            // Must extract .so so ProcessBuilder can execve them
             useLegacyPackaging = true
         }
     }
 }
 
-// ─── Bundle PRoot stack (UserLAnd arm64) into jniLibs ───
 val jniArm64 = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
 val prootSo = jniArm64.file("libproot.so")
 val loaderSo = jniArm64.file("libproot_loader.so")
@@ -84,14 +87,9 @@ val downloadProotStack by tasks.registering {
             throw GradleException("Failed to download UserLAnd assets (${tmpZip.length()} bytes)")
         }
 
-        // Unzip needed entries
         ant.invokeMethod(
             "unzip",
-            mapOf(
-                "src" to tmpZip,
-                "dest" to tmpDir,
-                "overwrite" to true,
-            ),
+            mapOf("src" to tmpZip, "dest" to tmpDir, "overwrite" to true),
         )
 
         fun findFile(name: String): File {
@@ -110,7 +108,6 @@ val downloadProotStack by tasks.registering {
         srcLoader.copyTo(loader, overwrite = true)
         srcTalloc.copyTo(talloc, overwrite = true)
 
-        // Sanity: ELF magic
         listOf(proot, loader, talloc).forEach { f ->
             val magic = f.inputStream().use { it.readNBytes(4) }
             if (magic[0] != 0x7f.toByte() || magic[1] != 'E'.code.toByte()) {

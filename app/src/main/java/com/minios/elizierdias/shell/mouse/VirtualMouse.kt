@@ -6,7 +6,9 @@ import android.view.MotionEvent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,6 +21,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -28,23 +31,21 @@ import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
 
 /**
- * Rato virtual — leve e responsivo.
+ * Rato virtual otimizado.
  *
- * - Arrastar: move o cursor (rápido)
- * - Toque: clique na posição do cursor
- * - Toque longo: “segura o botão”; o próximo arrasto injeta MOVE (mover janelas)
+ * Posição do cursor lida só na fase de *draw* (graphicsLayer),
+ * para não recompor o Desktop a cada pixel de movimento.
  */
 @Composable
 fun VirtualMouse(
     enabled: Boolean,
     modifier: Modifier = Modifier,
-    sensitivity: Float = 2.4f,
+    sensitivity: Float = 2.6f,
 ) {
     if (!enabled) return
 
     val hostView = LocalView.current
 
-    // FloatState evita allocations extra no hot path
     var cursorX by remember { mutableFloatStateOf(0f) }
     var cursorY by remember { mutableFloatStateOf(0f) }
     var maxX by remember { mutableFloatStateOf(1f) }
@@ -55,8 +56,6 @@ fun VirtualMouse(
 
     var captureTouches by remember { mutableStateOf(true) }
     var pendingClick by remember { mutableStateOf(false) }
-
-    // Modo “botão pressionado” após long-press (arrastar janela pela title bar)
     var holding by remember { mutableStateOf(false) }
     var holdDownTime by remember { mutableStateOf(0L) }
 
@@ -66,15 +65,8 @@ fun VirtualMouse(
     fun dispatch(action: Int, downTime: Long, eventTime: Long = downTime) {
         val target = hostView.rootView ?: hostView
         val ev = MotionEvent.obtain(
-            downTime,
-            eventTime,
-            action,
-            absX(),
-            absY(),
-            0,
-        ).apply {
-            source = InputDevice.SOURCE_TOUCHSCREEN
-        }
+            downTime, eventTime, action, absX(), absY(), 0,
+        ).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
         try {
             target.dispatchTouchEvent(ev)
         } finally {
@@ -85,20 +77,20 @@ fun VirtualMouse(
     fun clickAtCursor() {
         val t = SystemClock.uptimeMillis()
         dispatch(MotionEvent.ACTION_DOWN, t)
-        dispatch(MotionEvent.ACTION_UP, t, t + 35)
+        dispatch(MotionEvent.ACTION_UP, t, t + 30)
     }
 
     LaunchedEffect(pendingClick, captureTouches) {
         if (pendingClick && !captureTouches) {
             delay(8)
             clickAtCursor()
-            delay(40)
+            delay(32)
             pendingClick = false
             captureTouches = true
         }
     }
 
-    Canvas(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .zIndex(100_000f)
@@ -116,7 +108,6 @@ fun VirtualMouse(
             .then(
                 if (captureTouches) {
                     Modifier
-                        // Movimento: só drag, sem timeouts → fluido
                         .pointerInput(sensitivity) {
                             detectDragGestures(
                                 onDragStart = {
@@ -126,7 +117,6 @@ fun VirtualMouse(
                                         initialized = true
                                     }
                                     if (holding) {
-                                        // Já em hold: reinicia DOWN no sítio atual
                                         captureTouches = false
                                         holdDownTime = SystemClock.uptimeMillis()
                                         dispatch(MotionEvent.ACTION_DOWN, holdDownTime)
@@ -139,7 +129,6 @@ fun VirtualMouse(
                                         .coerceIn(0f, maxX)
                                     cursorY = (cursorY + dragAmount.y * sensitivity)
                                         .coerceIn(0f, maxY)
-
                                     if (holding) {
                                         captureTouches = false
                                         dispatch(
@@ -176,7 +165,6 @@ fun VirtualMouse(
                                 },
                             )
                         }
-                        // Toques: clique e long-press (sem competir com o drag)
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onTap = {
@@ -184,7 +172,6 @@ fun VirtualMouse(
                                     captureTouches = false
                                 },
                                 onDoubleTap = {
-                                    // dois cliques rápidos
                                     pendingClick = true
                                     captureTouches = false
                                 },
@@ -202,32 +189,38 @@ fun VirtualMouse(
                 },
             ),
     ) {
-        if (!initialized) return@Canvas
+        if (!initialized) return@Box
 
-        val x = cursorX
-        val y = cursorY
-
-        // Seta leve (poucos draw calls)
-        val path = Path().apply {
-            moveTo(x, y)
-            lineTo(x, y + 18.dp.toPx())
-            lineTo(x + 5.dp.toPx(), y + 14.dp.toPx())
-            lineTo(x + 10.dp.toPx(), y + 22.dp.toPx())
-            lineTo(x + 12.dp.toPx(), y + 20.dp.toPx())
-            lineTo(x + 7.dp.toPx(), y + 12.dp.toPx())
-            lineTo(x + 14.dp.toPx(), y + 12.dp.toPx())
-            close()
-        }
-        drawPath(path, Color.Black, style = Stroke(width = 3.dp.toPx()))
-        drawPath(path, Color.White)
-
-        // Indicador quando está a “segurar” (mover janela)
-        if (holding) {
-            drawCircle(
-                color = Color(0x8858A6FF),
-                radius = 10.dp.toPx(),
-                center = Offset(x, y),
-            )
+        // Cursor isolado: translation lida na fase de draw → sem recompor Desktop
+        Canvas(
+            modifier = Modifier
+                .size(28.dp)
+                .graphicsLayer {
+                    translationX = cursorX
+                    translationY = cursorY
+                    // camada GPU própria para o ponteiro
+                    clip = false
+                },
+        ) {
+            val path = Path().apply {
+                moveTo(0f, 0f)
+                lineTo(0f, 18.dp.toPx())
+                lineTo(5.dp.toPx(), 14.dp.toPx())
+                lineTo(10.dp.toPx(), 22.dp.toPx())
+                lineTo(12.dp.toPx(), 20.dp.toPx())
+                lineTo(7.dp.toPx(), 12.dp.toPx())
+                lineTo(14.dp.toPx(), 12.dp.toPx())
+                close()
+            }
+            drawPath(path, Color.Black, style = Stroke(width = 3.dp.toPx()))
+            drawPath(path, Color.White)
+            if (holding) {
+                drawCircle(
+                    color = Color(0x8858A6FF),
+                    radius = 9.dp.toPx(),
+                    center = Offset(4.dp.toPx(), 4.dp.toPx()),
+                )
+            }
         }
     }
 }
