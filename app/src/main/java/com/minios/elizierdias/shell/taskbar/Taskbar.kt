@@ -80,6 +80,7 @@ private val Accent = Color(0xFF60CDFF)
 private val OnSurface = Color(0xFFF3F3F3)
 private val OnSurfaceDim = Color(0xFFC8C8C8)
 private val FlyoutBg = Color(0xF22C2C2C)
+private val ExitRed = Color(0xFFF85149)
 
 @Composable
 fun Taskbar(
@@ -193,11 +194,7 @@ fun Taskbar(
                 ) {
                     QuickTile(
                         modifier = Modifier.weight(1f),
-                        icon = if (connected && wifi) {
-                            Icons.Filled.SignalWifi4Bar
-                        } else {
-                            Icons.Filled.WifiOff
-                        },
+                        icon = if (connected && wifi) Icons.Filled.SignalWifi4Bar else Icons.Filled.WifiOff,
                         label = when {
                             !connected -> "Sem rede"
                             wifi -> "Wi-Fi"
@@ -329,6 +326,34 @@ fun Taskbar(
             )
         }
 
+        Spacer(modifier = Modifier.width(4.dp))
+
+        // Botao SAIR sempre visivel
+        Row(
+            modifier = Modifier
+                .height(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0x33F85149))
+                .border(1.dp, ExitRed.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                .clickable(onClick = onExitMiniOS)
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                contentDescription = "Sair do MiniOS",
+                tint = ExitRed,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = "Sair",
+                color = ExitRed,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+
         Spacer(modifier = Modifier.width(6.dp))
 
         Row(
@@ -342,7 +367,7 @@ fun Taskbar(
                 val active = window.isFocused && !window.isMinimized
                 Row(
                     modifier = Modifier
-                        .widthIn(max = 130.dp)
+                        .widthIn(max = 120.dp)
                         .height(32.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (active) Color(0x33FFFFFF) else Color.Transparent)
