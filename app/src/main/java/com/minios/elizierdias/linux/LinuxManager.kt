@@ -3,11 +3,6 @@
  * MiniOS - Desktop-style environment for Android
  *
  * PROPRIETARY SOFTWARE — All Rights Reserved.
- * This file is part of MiniOS.
- * See LICENSE and COPYRIGHT.md for full terms.
- *
- * Unauthorized copying, modification, distribution or reuse of this file,
- * via any medium, is strictly prohibited without prior written permission.
  */
 
 package com.minios.elizierdias.linux
@@ -75,6 +70,34 @@ class LinuxManager(
         _rootFsStatus.value = rootFs.status()
         if (result.isSuccess) {
             _statusMessage.value = "RootFS installed — next: setup-runtime"
+        }
+        return result
+    }
+
+    /**
+     * Wipe broken RootFS (e.g. missing symlinks) and install from scratch.
+     */
+    suspend fun reinstallRootFs(): Result<Unit> {
+        _isReady.value = false
+        LinuxConfig.setEnabled(false)
+        currentSession?.close()
+        currentSession = null
+
+        _installProgress.value = "Wiping old RootFS..."
+        _statusMessage.value = "Wiping old RootFS..."
+        rootFs.clearInstalledMarker()
+        rootFs.wipeRootFs().getOrElse { e ->
+            return Result.failure(e)
+        }
+
+        _installProgress.value = "Reinstalling RootFS (symlinks included)..."
+        val result = rootFs.install { msg ->
+            _installProgress.value = msg
+            _statusMessage.value = msg
+        }
+        _rootFsStatus.value = rootFs.status()
+        if (result.isSuccess) {
+            _statusMessage.value = "RootFS reinstalled — next: setup-runtime"
         }
         return result
     }

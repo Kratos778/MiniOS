@@ -3,11 +3,6 @@
  * MiniOS - Desktop-style environment for Android
  *
  * PROPRIETARY SOFTWARE — All Rights Reserved.
- * This file is part of MiniOS.
- * See LICENSE and COPYRIGHT.md for full terms.
- *
- * Unauthorized copying, modification, distribution or reuse of this file,
- * via any medium, is strictly prohibited without prior written permission.
  */
 
 package com.minios.elizierdias.apps.terminal
@@ -20,10 +15,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -102,18 +98,19 @@ fun TerminalApp() {
                 "(${status.distro ?: "—"}) " +
                 LinuxRootFs.formatSize(status.estimatedSizeBytes),
         )
-        lines.add("proot  : ${if (rt.isProotInstalled()) "ok (jniLibs)" else "MISSING — reinstall APK 0.3.7+"}")
+        lines.add("proot  : ${if (rt.isProotInstalled()) "ok (jniLibs)" else "MISSING — reinstall APK"}")
         lines.add("storage: ${if (rt.isStorageReady()) "ok" else "corre setup-storage"}")
         rt.diagnostic().lines().forEach { lines.add(it) }
         lines.add("")
         if (!status.isInstalled) {
-            lines.add("1) install")
+            lines.add("1) install   (ou reinstall-rootfs se estiver partido)")
             lines.add("2) setup-runtime")
             lines.add("3) setup-storage")
         } else if (!rt.isProotInstalled()) {
-            lines.add("libproot.so em falta no APK — desinstala e instala build novo")
+            lines.add("libproot.so em falta — reinstala o APK")
         } else {
             lines.add("Linux pronto. Exemplos: uname -a | ls / | cd /sdcard")
+            lines.add("Segura o texto para copiar (instalação, erros, etc.)")
             session = linuxManager.startSession()
             promptCwd = session?.cwd ?: "/root"
         }
@@ -138,6 +135,8 @@ fun TerminalApp() {
                 "setup-runtime"
             "repair-proot", "repairproot", "fix-proot" ->
                 "repair-proot"
+            "reinstall-rootfs", "reinstall", "reinstall_rootfs", "wipe-install" ->
+                "reinstall-rootfs"
             else -> cmd.trim()
         }
     }
@@ -146,8 +145,11 @@ fun TerminalApp() {
         val cmd = normalizeBuiltin(raw)
         when (cmd) {
             "help" -> {
-                lines.add("Setup: install | setup-runtime | setup-storage | status")
+                lines.add("Setup:")
+                lines.add("  install | reinstall-rootfs | setup-runtime | setup-storage")
+                lines.add("  repair-proot | status | clear")
                 lines.add("Linux: uname -a | ls / | cd /sdcard | pwd")
+                lines.add("Dica: segura o texto do terminal para copiar")
                 lines.add("")
                 return true
             }
@@ -179,7 +181,7 @@ fun TerminalApp() {
                     return true
                 }
                 if (rootFsStatus?.isInstalled == true) {
-                    lines.add("RootFS já instalado.")
+                    lines.add("RootFS já instalado. Para regenerar: reinstall-rootfs")
                     lines.add("")
                     return true
                 }
@@ -189,6 +191,27 @@ fun TerminalApp() {
                     busy = false
                     lines.add(
                         if (r.isSuccess) "✓ install OK — agora: setup-runtime"
+                        else "✗ ${r.exceptionOrNull()?.message}",
+                    )
+                    lines.add("")
+                    scrollToBottom()
+                }
+                return true
+            }
+            "reinstall-rootfs" -> {
+                if (busy) {
+                    lines.add("ocupado...")
+                    return true
+                }
+                busy = true
+                session = null
+                scope.launch {
+                    lines.add("A apagar RootFS antigo e reinstalar (com symlinks)...")
+                    scrollToBottom()
+                    val r = linuxManager.reinstallRootFs()
+                    busy = false
+                    lines.add(
+                        if (r.isSuccess) "✓ reinstall-rootfs OK — agora: setup-runtime"
                         else "✗ ${r.exceptionOrNull()?.message}",
                     )
                     lines.add("")
@@ -206,7 +229,7 @@ fun TerminalApp() {
                     val r = linuxManager.setupRuntime()
                     busy = false
                     if (r.isSuccess) {
-                        lines.add("✓ PRoot OK (jniLibs)")
+                        lines.add("✓ PRoot OK")
                         session = linuxManager.startSession()
                         promptCwd = session?.cwd ?: "/root"
                         lines.add("Sessão Linux ativa.")
@@ -320,17 +343,22 @@ fun TerminalApp() {
             )
         }
 
-        LazyColumn(
-            state = listState,
+        // Texto selecionável — segura para copiar (download, erros, etc.)
+        SelectionContainer(
             modifier = Modifier.weight(1f),
         ) {
-            items(lines) { line ->
-                Text(
-                    text = line,
-                    color = Color(0xFF3FB950),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                )
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                itemsIndexed(lines) { index, line ->
+                    Text(
+                        text = line,
+                        color = Color(0xFF3FB950),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                    )
+                }
             }
         }
 
