@@ -89,9 +89,13 @@ fun Desktop() {
         }
     }
 
-    // Root: UI + mouse overlay (mouse ALWAYS on top when enabled)
+    // Root: UI em baixo, rato SEMPRE por cima (taskbar + janelas)
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(0f),
+        ) {
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -168,7 +172,8 @@ fun Desktop() {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(TaskbarHeight),
+                    .height(TaskbarHeight)
+                    .zIndex(1f),
             ) {
                 Taskbar(
                     openWindows = windowManager.windows,
@@ -188,12 +193,12 @@ fun Desktop() {
             }
         }
 
-        // Full-screen mouse layer — above windows AND taskbar
+        // Overlay full-screen — por cima da taskbar e das janelas
         VirtualMouse(
             enabled = mouseEnabled,
             modifier = Modifier
                 .fillMaxSize()
-                .zIndex(10_000f),
+                .zIndex(100_000f),
         )
     }
 }

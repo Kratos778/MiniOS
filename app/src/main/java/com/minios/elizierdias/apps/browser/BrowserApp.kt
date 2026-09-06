@@ -81,6 +81,31 @@ fun BrowserApp() {
     val selectedIndex = tabs.indexOfFirst { it.id == selectedTabId }.coerceAtLeast(0)
     val selectedTab = tabs.getOrNull(selectedIndex) ?: tabs.first()
 
+    fun fitPage(view: WebView) {
+        val w = view.width.coerceAtLeast(1)
+        // Escala para caber a largura “desktop” na janela real
+        val scale = ((w * 100) / 1100).coerceIn(30, 100)
+        view.setInitialScale(scale)
+        view.evaluateJavascript(
+            """
+            (function() {
+              var vw = Math.max(document.documentElement.clientWidth || 0, $w);
+              var meta = document.querySelector('meta[name=viewport]');
+              if (!meta) {
+                meta = document.createElement('meta');
+                meta.name = 'viewport';
+                document.head.appendChild(meta);
+              }
+              meta.setAttribute('content',
+                'width=' + vw +
+                ', initial-scale=1.0, maximum-scale=5.0, user-scalable=yes');
+              document.documentElement.style.zoom = '1';
+            })();
+            """.trimIndent(),
+            null,
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -255,20 +280,19 @@ fun BrowserApp() {
                             cacheMode = WebSettings.LOAD_DEFAULT
                             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
 
-                            // Layout desktop fixo — adapta-se ao ecrã, sem zoom por pinça
                             useWideViewPort = true
                             loadWithOverviewMode = true
-                            setSupportZoom(false)
-                            builtInZoomControls = false
+                            setSupportZoom(true)
+                            builtInZoomControls = true
                             displayZoomControls = false
 
-                            // Escala padrão compacta (fixixa)
-                            textZoom = 65
-                            defaultFontSize = 13
+                            // Texto mais compacto dentro da janela
+                            textZoom = 55
+                            defaultFontSize = 12
                             minimumFontSize = 8
 
                             userAgentString =
-                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                                "Mozilla/5.0 (Linux; Android 13; Tablet) " +
                                     "AppleWebKit/537.36 (KHTML, like Gecko) " +
                                     "Chrome/121.0.0.0 Safari/537.36"
 
@@ -300,27 +324,7 @@ fun BrowserApp() {
 
                             override fun onPageFinished(view: WebView, url: String?) {
                                 super.onPageFinished(view, url)
-
-                                // Viewport fixo: sem zoom do utilizador, largura desktop padrão
-                                view.evaluateJavascript(
-                                    """
-                                    (function() {
-                                      var w = 1280;
-                                      var meta = document.querySelector('meta[name=viewport]');
-                                      if (!meta) {
-                                        meta = document.createElement('meta');
-                                        meta.name = 'viewport';
-                                        document.head.appendChild(meta);
-                                      }
-                                      meta.setAttribute('content',
-                                        'width=' + w +
-                                        ', initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no');
-                                      document.documentElement.style.touchAction = 'pan-x pan-y';
-                                    })();
-                                    """.trimIndent(),
-                                    null,
-                                )
-
+                                fitPage(view)
                                 if (selectedIndex !in tabs.indices) return
                                 val title = view.title?.takeIf { it.isNotBlank() } ?: "Página"
                                 tabs[selectedIndex] = tabs[selectedIndex].copy(
@@ -339,6 +343,7 @@ fun BrowserApp() {
                     if (view.url != selectedTab.url && selectedTab.url.isNotBlank()) {
                         view.loadUrl(selectedTab.url)
                     }
+                    if (view.width > 0) fitPage(view)
                     webView = view
                 },
             )
