@@ -117,13 +117,11 @@ class LinuxRuntime(
                 copyFile(src, dest)
             }
             dest.setReadable(true, false)
-            // also plain name for good measure
             val plain = File(dir, "libtalloc.so")
             if (!plain.exists() || plain.length() != src.length()) {
                 copyFile(src, plain)
             }
         }
-        // loader copy (some builds resolve relative to cwd)
         loaderFile()?.let { srcLoader ->
             val dest = File(dir, "libproot_loader.so")
             if (!dest.exists() || dest.length() != srcLoader.length()) {
@@ -158,7 +156,7 @@ class LinuxRuntime(
                 if (proot == null) {
                     return@withContext Result.failure(
                         IllegalStateException(
-                            "libproot.so not in APK.\n$diagnostic()",
+                            "libproot.so not in APK.\n${diagnostic()}",
                         ),
                     )
                 }
@@ -262,13 +260,11 @@ class LinuxRuntime(
         env["LANG"] = "C.UTF-8"
         env["USER"] = "root"
 
-        // Loader (UserLAnd / Termux proot)
         val loader = loaderFile() ?: File(linkLibDir(), "libproot_loader.so")
         if (loader.isFile) {
             env["PROOT_LOADER"] = loader.absolutePath
         }
 
-        // Critical: libtalloc.so.2 must be on LD_LIBRARY_PATH
         val paths = listOfNotNull(linkLib, nativeLib).distinct()
         env["LD_LIBRARY_PATH"] = paths.joinToString(":")
     }
@@ -365,7 +361,6 @@ class LinuxRuntime(
                 stderr = stderr.toString().trimEnd(),
             )
 
-            // Surface linker errors clearly
             if (result.exitCode != 0 &&
                 result.stderr.contains("not found", ignoreCase = true)
             ) {
