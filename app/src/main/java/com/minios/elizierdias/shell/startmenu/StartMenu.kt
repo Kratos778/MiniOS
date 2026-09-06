@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -71,7 +71,7 @@ fun StartMenu(
                         tint = Color(0xFF58A6FF),
                         modifier = Modifier.size(18.dp),
                     )
-                    Spacer(Modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(app.title, color = Color(0xFFC9D1D9), fontSize = 13.sp)
                 }
             }
@@ -97,7 +97,7 @@ fun StartMenu(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    Icons.Filled.ExitToApp,
+                    Icons.AutoMirrored.Filled.ExitToApp,
                     contentDescription = "Sair",
                     tint = Color(0xFFF85149),
                     modifier = Modifier.size(18.dp),

@@ -15,6 +15,7 @@ import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,10 +33,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.NetworkCell
 import androidx.compose.material.icons.filled.SignalWifi4Bar
@@ -136,7 +137,13 @@ fun Taskbar(
                     status == BatteryManager.BATTERY_STATUS_FULL
             }
         }
-        context.registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+        if (Build.VERSION.SDK_INT >= 33) {
+            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            context.registerReceiver(receiver, filter)
+        }
         onDispose {
             try {
                 context.unregisterReceiver(receiver)
@@ -180,7 +187,6 @@ fun Taskbar(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // So estado interno — NAO abre definicoes do telefone
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -245,7 +251,7 @@ fun Taskbar(
                     )
                     QuickTile(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Filled.ExitToApp,
+                        icon = Icons.AutoMirrored.Filled.ExitToApp,
                         label = "Sair",
                         active = false,
                         onClick = {
@@ -496,7 +502,16 @@ private fun readBatteryLevel(context: Context): Int {
 
 private fun isCharging(context: Context): Boolean {
     return try {
-        val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val intent = if (Build.VERSION.SDK_INT >= 33) {
+            context.registerReceiver(
+                null,
+                IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+                Context.RECEIVER_NOT_EXPORTED,
+            )
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        }
         val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: return false
         status == BatteryManager.BATTERY_STATUS_CHARGING ||
             status == BatteryManager.BATTERY_STATUS_FULL
