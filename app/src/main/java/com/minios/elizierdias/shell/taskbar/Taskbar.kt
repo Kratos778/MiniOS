@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -65,9 +64,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.minios.elizierdias.core.MiniWindow
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -152,29 +153,20 @@ fun Taskbar(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .zIndex(50f),
-    ) {
-        // Quick Settings flyout (acima da taskbar)
-        if (showQuickSettings) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(0.dp),
-            )
+    if (showQuickSettings) {
+        Popup(
+            alignment = Alignment.BottomEnd,
+            offset = IntOffset(-12, -56),
+            onDismissRequest = { showQuickSettings = false },
+            properties = PopupProperties(focusable = true, dismissOnBackPress = true, dismissOnClickOutside = true),
+        ) {
             Column(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 8.dp, bottom = 52.dp)
-                    .widthIn(max = 320.dp)
                     .width(300.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(FlyoutBg)
                     .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp))
-                    .padding(14.dp)
-                    .zIndex(60f),
+                    .padding(14.dp),
             ) {
                 Text(
                     text = "Definicoes rapidas",
@@ -200,14 +192,7 @@ fun Taskbar(
                         onClick = {
                             connected = isNetworkConnected(context)
                             wifi = isWifi(context)
-                            try {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_WIFI_SETTINGS).addFlags(
-                                        Intent.FLAG_ACTIVITY_NEW_TASK,
-                                    ),
-                                )
-                            } catch (_: Exception) {
-                            }
+                            openAndroidSettings(context, Settings.ACTION_WIFI_SETTINGS)
                         },
                     )
                     QuickTile(
@@ -216,14 +201,7 @@ fun Taskbar(
                         label = "Internet",
                         active = connected && !wifi,
                         onClick = {
-                            try {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_WIRELESS_SETTINGS).addFlags(
-                                        Intent.FLAG_ACTIVITY_NEW_TASK,
-                                    ),
-                                )
-                            } catch (_: Exception) {
-                            }
+                            openAndroidSettings(context, Settings.ACTION_WIRELESS_SETTINGS)
                         },
                     )
                     QuickTile(
@@ -232,14 +210,7 @@ fun Taskbar(
                         label = "Bluetooth",
                         active = false,
                         onClick = {
-                            try {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(
-                                        Intent.FLAG_ACTIVITY_NEW_TASK,
-                                    ),
-                                )
-                            } catch (_: Exception) {
-                            }
+                            openAndroidSettings(context, Settings.ACTION_BLUETOOTH_SETTINGS)
                         },
                     )
                 }
@@ -260,17 +231,10 @@ fun Taskbar(
                     QuickTile(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Filled.Brightness6,
-                        label = "Tema",
+                        label = "Ecran",
                         active = false,
                         onClick = {
-                            try {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_DISPLAY_SETTINGS).addFlags(
-                                        Intent.FLAG_ACTIVITY_NEW_TASK,
-                                    ),
-                                )
-                            } catch (_: Exception) {
-                            }
+                            openAndroidSettings(context, Settings.ACTION_DISPLAY_SETTINGS)
                         },
                     )
                     QuickTile(
@@ -279,14 +243,7 @@ fun Taskbar(
                         label = "Sistema",
                         active = false,
                         onClick = {
-                            try {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_SETTINGS).addFlags(
-                                        Intent.FLAG_ACTIVITY_NEW_TASK,
-                                    ),
-                                )
-                            } catch (_: Exception) {
-                            }
+                            openAndroidSettings(context, Settings.ACTION_SETTINGS)
                         },
                     )
                 }
@@ -319,175 +276,155 @@ fun Taskbar(
 
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = if (charging) "Bateria $batteryLevel% (a carregar)" else "Bateria $batteryLevel%",
+                    text = if (charging) {
+                        "Bateria $batteryLevel% (a carregar)"
+                    } else {
+                        "Bateria $batteryLevel%"
+                    },
                     color = OnSurfaceDim,
                     fontSize = 12.sp,
                 )
             }
         }
+    }
 
-        // Barra principal
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .background(TaskbarBg)
+            .padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onStartClick)
+                .background(Color(0x22FFFFFF)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Apps,
+                contentDescription = "Start",
+                tint = Accent,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+
+        Spacer(modifier = Modifier.width(6.dp))
+
         Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .align(Alignment.BottomCenter)
-                .background(TaskbarBg)
-                .padding(horizontal = 8.dp),
+                .weight(1f)
+                .fillMaxHeight(),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onStartClick)
-                    .background(Color(0x22FFFFFF)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Apps,
-                    contentDescription = "Start",
-                    tint = Accent,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                openWindows.forEach { window ->
-                    val active = window.isFocused && !window.isMinimized
-                    Row(
-                        modifier = Modifier
-                            .widthIn(max = 140.dp)
-                            .height(36.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (active) Color(0x33FFFFFF) else Color.Transparent)
-                            .then(
-                                if (active) {
-                                    Modifier.border(
-                                        1.dp,
-                                        Accent.copy(alpha = 0.55f),
-                                        RoundedCornerShape(8.dp),
-                                    )
-                                } else {
-                                    Modifier
-                                },
-                            )
-                            .clickable { onWindowClick(window.instanceId) }
-                            .padding(horizontal = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = window.app.icon,
-                            contentDescription = null,
-                            tint = if (active) OnSurface else OnSurfaceDim,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = window.app.title,
-                            color = if (active) OnSurface else OnSurfaceDim,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
-            }
-
-            // System tray pill
-            Row(
-                modifier = Modifier
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(PillBg)
-                    .clickable { showQuickSettings = !showQuickSettings }
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = if (connected) Icons.Filled.SignalWifi4Bar else Icons.Filled.WifiOff,
-                    contentDescription = "Rede",
-                    tint = if (connected) Accent else OnSurfaceDim,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = when {
-                        !connected -> "Off"
-                        wifi -> "Wi-Fi"
-                        else -> "Dados"
-                    },
-                    color = if (connected) OnSurface else OnSurfaceDim,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                Icon(
-                    imageVector = Icons.Filled.Mouse,
-                    contentDescription = null,
-                    tint = if (mouseEnabled) Accent else OnSurfaceDim,
+            openWindows.forEach { window ->
+                val active = window.isFocused && !window.isMinimized
+                Row(
                     modifier = Modifier
-                        .size(16.dp)
-                        .clickable { onMouseToggle(!mouseEnabled) },
-                )
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                Icon(
-                    imageVector = Icons.Filled.BatteryFull,
-                    contentDescription = "Bateria",
-                    tint = when {
-                        batteryLevel <= 15 -> Color(0xFFFF6B6B)
-                        charging -> Color(0xFF3FB950)
-                        else -> OnSurfaceDim
-                    },
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(modifier = Modifier.width(2.dp))
-                Text(
-                    text = "$batteryLevel%",
-                    color = OnSurface,
-                    fontSize = 11.sp,
-                )
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = timeText,
-                        color = OnSurface,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        lineHeight = 14.sp,
+                        .widthIn(max = 130.dp)
+                        .height(32.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (active) Color(0x33FFFFFF) else Color.Transparent)
+                        .then(
+                            if (active) {
+                                Modifier.border(
+                                    1.dp,
+                                    Accent.copy(alpha = 0.55f),
+                                    RoundedCornerShape(8.dp),
+                                )
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .clickable { onWindowClick(window.instanceId) }
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = window.app.icon,
+                        contentDescription = null,
+                        tint = if (active) OnSurface else OnSurfaceDim,
+                        modifier = Modifier.size(15.dp),
                     )
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = dateText,
-                        color = OnSurfaceDim,
-                        fontSize = 10.sp,
-                        lineHeight = 12.sp,
+                        text = window.app.title,
+                        color = if (active) OnSurface else OnSurfaceDim,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
         }
 
-        // Tap fora fecha o painel
-        if (showQuickSettings) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable { showQuickSettings = false }
-                    .zIndex(55f),
+        Row(
+            modifier = Modifier
+                .height(32.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(PillBg)
+                .clickable { showQuickSettings = !showQuickSettings }
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = if (connected) Icons.Filled.SignalWifi4Bar else Icons.Filled.WifiOff,
+                contentDescription = "Rede",
+                tint = if (connected) Accent else OnSurfaceDim,
+                modifier = Modifier.size(16.dp),
             )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = when {
+                    !connected -> "Off"
+                    wifi -> "Wi-Fi"
+                    else -> "Dados"
+                },
+                color = if (connected) OnSurface else OnSurfaceDim,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+            )
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            Icon(
+                imageVector = Icons.Filled.BatteryFull,
+                contentDescription = "Bateria",
+                tint = when {
+                    batteryLevel <= 15 -> Color(0xFFFF6B6B)
+                    charging -> Color(0xFF3FB950)
+                    else -> OnSurfaceDim
+                },
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(2.dp))
+            Text(
+                text = "$batteryLevel%",
+                color = OnSurface,
+                fontSize = 11.sp,
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = timeText,
+                    color = OnSurface,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 13.sp,
+                )
+                Text(
+                    text = dateText,
+                    color = OnSurfaceDim,
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp,
+                )
+            }
         }
     }
 }
@@ -524,6 +461,13 @@ private fun QuickTile(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+private fun openAndroidSettings(context: Context, action: String) {
+    try {
+        context.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    } catch (_: Exception) {
     }
 }
 
