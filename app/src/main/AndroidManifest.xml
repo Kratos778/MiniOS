@@ -4,6 +4,10 @@
 
     <queries>
         <package android:name="com.appplayysmartt" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
     </queries>
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -43,11 +47,19 @@
             android:exported="true"
             android:hardwareAccelerated="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-            android:screenOrientation="landscape">
+            android:screenOrientation="landscape"
+            android:launchMode="singleTask">
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- Opcional: definir MiniOS como launcher / ecran inicial -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
 
         </activity>

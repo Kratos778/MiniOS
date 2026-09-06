@@ -15,7 +15,6 @@ import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
-import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,10 +35,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.Brightness6
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.NetworkCell
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SignalWifi4Bar
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.WifiOff
@@ -89,6 +87,7 @@ fun Taskbar(
     onMouseToggle: (Boolean) -> Unit,
     onStartClick: () -> Unit,
     onWindowClick: (String) -> Unit,
+    onExitMiniOS: () -> Unit = {},
 ) {
     val context = LocalContext.current
 
@@ -97,6 +96,7 @@ fun Taskbar(
     var connected by remember { mutableStateOf(isNetworkConnected(context)) }
     var wifi by remember { mutableStateOf(isWifi(context)) }
     var showQuickSettings by remember { mutableStateOf(false) }
+    var statusNote by remember { mutableStateOf<String?>(null) }
 
     var timeText by remember {
         mutableStateOf(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()))
@@ -158,7 +158,11 @@ fun Taskbar(
             alignment = Alignment.BottomEnd,
             offset = IntOffset(-12, -56),
             onDismissRequest = { showQuickSettings = false },
-            properties = PopupProperties(focusable = true, dismissOnBackPress = true, dismissOnClickOutside = true),
+            properties = PopupProperties(
+                focusable = true,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = true,
+            ),
         ) {
             Column(
                 modifier = Modifier
@@ -169,20 +173,25 @@ fun Taskbar(
                     .padding(14.dp),
             ) {
                 Text(
-                    text = "Definicoes rapidas",
+                    text = "MiniOS — rapido",
                     color = OnSurface,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // So estado interno — NAO abre definicoes do telefone
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     QuickTile(
                         modifier = Modifier.weight(1f),
-                        icon = if (connected && wifi) Icons.Filled.SignalWifi4Bar else Icons.Filled.WifiOff,
+                        icon = if (connected && wifi) {
+                            Icons.Filled.SignalWifi4Bar
+                        } else {
+                            Icons.Filled.WifiOff
+                        },
                         label = when {
                             !connected -> "Sem rede"
                             wifi -> "Wi-Fi"
@@ -192,16 +201,22 @@ fun Taskbar(
                         onClick = {
                             connected = isNetworkConnected(context)
                             wifi = isWifi(context)
-                            openAndroidSettings(context, Settings.ACTION_WIFI_SETTINGS)
+                            statusNote = when {
+                                !connected -> "Sem ligacao"
+                                wifi -> "Wi-Fi ativo"
+                                else -> "Dados moveis ativos"
+                            }
                         },
                     )
                     QuickTile(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Filled.NetworkCell,
                         label = "Internet",
-                        active = connected && !wifi,
+                        active = connected,
                         onClick = {
-                            openAndroidSettings(context, Settings.ACTION_WIRELESS_SETTINGS)
+                            connected = isNetworkConnected(context)
+                            wifi = isWifi(context)
+                            statusNote = if (connected) "Online" else "Offline"
                         },
                     )
                     QuickTile(
@@ -210,7 +225,7 @@ fun Taskbar(
                         label = "Bluetooth",
                         active = false,
                         onClick = {
-                            openAndroidSettings(context, Settings.ACTION_BLUETOOTH_SETTINGS)
+                            statusNote = "Bluetooth: so estado (sem sair do MiniOS)"
                         },
                     )
                 }
@@ -230,20 +245,12 @@ fun Taskbar(
                     )
                     QuickTile(
                         modifier = Modifier.weight(1f),
-                        icon = Icons.Filled.Brightness6,
-                        label = "Ecran",
+                        icon = Icons.Filled.ExitToApp,
+                        label = "Sair",
                         active = false,
                         onClick = {
-                            openAndroidSettings(context, Settings.ACTION_DISPLAY_SETTINGS)
-                        },
-                    )
-                    QuickTile(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Filled.Settings,
-                        label = "Sistema",
-                        active = false,
-                        onClick = {
-                            openAndroidSettings(context, Settings.ACTION_SETTINGS)
+                            showQuickSettings = false
+                            onExitMiniOS()
                         },
                     )
                 }
@@ -284,6 +291,10 @@ fun Taskbar(
                     color = OnSurfaceDim,
                     fontSize = 12.sp,
                 )
+                statusNote?.let { note ->
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(text = note, color = Accent, fontSize = 11.sp)
+                }
             }
         }
     }
@@ -461,13 +472,6 @@ private fun QuickTile(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-private fun openAndroidSettings(context: Context, action: String) {
-    try {
-        context.startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    } catch (_: Exception) {
     }
 }
 

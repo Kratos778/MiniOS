@@ -50,6 +50,7 @@ import com.minios.elizierdias.core.MiniOSConfig
 import com.minios.elizierdias.personalization.AnimatedWallpaper
 import com.minios.elizierdias.personalization.VideoWallpaper
 import com.minios.elizierdias.personalization.Wallpapers
+import com.minios.elizierdias.shell.exitMiniOS
 import com.minios.elizierdias.shell.mouse.VirtualMouse
 import com.minios.elizierdias.shell.startmenu.StartMenu
 import com.minios.elizierdias.shell.taskbar.Taskbar
@@ -83,13 +84,12 @@ fun Desktop() {
         if (app.id == "smartplay") {
             val intent = context.packageManager.getLaunchIntentForPackage("com.appplayysmartt")
             if (intent != null) context.startActivity(intent)
-            else Toast.makeText(context, "SmartPlay não está instalado", Toast.LENGTH_SHORT).show()
+            else Toast.makeText(context, "SmartPlay nao esta instalado", Toast.LENGTH_SHORT).show()
         } else {
             windowManager.openApp(app, desktopSizePx)
         }
     }
 
-    // Root: UI em baixo, rato SEMPRE por cima (taskbar + janelas)
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -165,6 +165,7 @@ fun Desktop() {
                             launchApp(app)
                         },
                         onDismiss = { startMenuOpen = false },
+                        onExitMiniOS = { exitMiniOS(context) },
                     )
                 }
             }
@@ -189,11 +190,11 @@ fun Desktop() {
                             windowManager.restore(id)
                         }
                     },
+                    onExitMiniOS = { exitMiniOS(context) },
                 )
             }
         }
 
-        // Overlay full-screen — por cima da taskbar e das janelas
         VirtualMouse(
             enabled = mouseEnabled,
             modifier = Modifier
