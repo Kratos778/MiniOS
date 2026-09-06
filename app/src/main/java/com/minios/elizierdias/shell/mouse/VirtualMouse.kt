@@ -17,7 +17,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -31,10 +30,11 @@ import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
 
 /**
- * Rato virtual otimizado.
+ * Rato virtual — estável (sem long-press que crashava).
  *
- * Posição do cursor lida só na fase de *draw* (graphicsLayer),
- * para não recompor o Desktop a cada pixel de movimento.
+ * - Arrastar: move o cursor
+ * - Toque: clique na posição do cursor
+ * - Mover janela: Mouse OFF → arrastar a barra de título com o dedo
  */
 @Composable
 fun VirtualMouse(
@@ -56,34 +56,38 @@ fun VirtualMouse(
 
     var captureTouches by remember { mutableStateOf(true) }
     var pendingClick by remember { mutableStateOf(false) }
-    var holding by remember { mutableStateOf(false) }
-    var holdDownTime by remember { mutableStateOf(0L) }
 
     fun absX() = originX + cursorX
     fun absY() = originY + cursorY
 
-    fun dispatch(action: Int, downTime: Long, eventTime: Long = downTime) {
-        val target = hostView.rootView ?: hostView
-        val ev = MotionEvent.obtain(
-            downTime, eventTime, action, absX(), absY(), 0,
-        ).apply { source = InputDevice.SOURCE_TOUCHSCREEN }
-        try {
-            target.dispatchTouchEvent(ev)
-        } finally {
-            ev.recycle()
-        }
-    }
-
     fun clickAtCursor() {
+        val target = hostView.rootView ?: hostView
+        val x = absX()
+        val y = absY()
         val t = SystemClock.uptimeMillis()
-        dispatch(MotionEvent.ACTION_DOWN, t)
-        dispatch(MotionEvent.ACTION_UP, t, t + 30)
+        val down = MotionEvent.obtain(t, t, MotionEvent.ACTION_DOWN, x, y, 0).apply {
+            source = InputDevice.SOURCE_TOUCHSCREEN
+        }
+        val up = MotionEvent.obtain(t, t + 30, MotionEvent.ACTION_UP, x, y, 0).apply {
+            source = InputDevice.SOURCE_TOUCHSCREEN
+        }
+        try {
+            target.dispatchTouchEvent(down)
+            target.dispatchTouchEvent(up)
+        } finally {
+            down.recycle()
+            up.recycle()
+        }
     }
 
     LaunchedEffect(pendingClick, captureTouches) {
         if (pendingClick && !captureTouches) {
             delay(8)
-            clickAtCursor()
+            try {
+                clickAtCursor()
+            } catch (_: Exception) {
+                // nunca crashar a Activity por causa do clique virtual
+            }
             delay(32)
             pendingClick = false
             captureTouches = true
@@ -109,61 +113,18 @@ fun VirtualMouse(
                 if (captureTouches) {
                     Modifier
                         .pointerInput(sensitivity) {
-                            detectDragGestures(
-                                onDragStart = {
-                                    if (!initialized) {
-                                        cursorX = size.width / 2f
-                                        cursorY = size.height / 2f
-                                        initialized = true
-                                    }
-                                    if (holding) {
-                                        captureTouches = false
-                                        holdDownTime = SystemClock.uptimeMillis()
-                                        dispatch(MotionEvent.ACTION_DOWN, holdDownTime)
-                                        captureTouches = true
-                                    }
-                                },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    cursorX = (cursorX + dragAmount.x * sensitivity)
-                                        .coerceIn(0f, maxX)
-                                    cursorY = (cursorY + dragAmount.y * sensitivity)
-                                        .coerceIn(0f, maxY)
-                                    if (holding) {
-                                        captureTouches = false
-                                        dispatch(
-                                            MotionEvent.ACTION_MOVE,
-                                            holdDownTime,
-                                            SystemClock.uptimeMillis(),
-                                        )
-                                        captureTouches = true
-                                    }
-                                },
-                                onDragEnd = {
-                                    if (holding) {
-                                        captureTouches = false
-                                        dispatch(
-                                            MotionEvent.ACTION_UP,
-                                            holdDownTime,
-                                            SystemClock.uptimeMillis(),
-                                        )
-                                        captureTouches = true
-                                        holding = false
-                                    }
-                                },
-                                onDragCancel = {
-                                    if (holding) {
-                                        captureTouches = false
-                                        dispatch(
-                                            MotionEvent.ACTION_CANCEL,
-                                            holdDownTime,
-                                            SystemClock.uptimeMillis(),
-                                        )
-                                        captureTouches = true
-                                        holding = false
-                                    }
-                                },
-                            )
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                if (!initialized) {
+                                    cursorX = size.width / 2f
+                                    cursorY = size.height / 2f
+                                    initialized = true
+                                }
+                                cursorX = (cursorX + dragAmount.x * sensitivity)
+                                    .coerceIn(0f, maxX)
+                                cursorY = (cursorY + dragAmount.y * sensitivity)
+                                    .coerceIn(0f, maxY)
+                            }
                         }
                         .pointerInput(Unit) {
                             detectTapGestures(
@@ -175,13 +136,7 @@ fun VirtualMouse(
                                     pendingClick = true
                                     captureTouches = false
                                 },
-                                onLongPress = {
-                                    holding = true
-                                    holdDownTime = SystemClock.uptimeMillis()
-                                    captureTouches = false
-                                    dispatch(MotionEvent.ACTION_DOWN, holdDownTime)
-                                    captureTouches = true
-                                },
+                                // long-press DESATIVADO — injectar HOLD crashava a app
                             )
                         }
                 } else {
@@ -191,14 +146,12 @@ fun VirtualMouse(
     ) {
         if (!initialized) return@Box
 
-        // Cursor isolado: translation lida na fase de draw → sem recompor Desktop
         Canvas(
             modifier = Modifier
                 .size(28.dp)
                 .graphicsLayer {
                     translationX = cursorX
                     translationY = cursorY
-                    // camada GPU própria para o ponteiro
                     clip = false
                 },
         ) {
@@ -214,13 +167,6 @@ fun VirtualMouse(
             }
             drawPath(path, Color.Black, style = Stroke(width = 3.dp.toPx()))
             drawPath(path, Color.White)
-            if (holding) {
-                drawCircle(
-                    color = Color(0x8858A6FF),
-                    radius = 9.dp.toPx(),
-                    center = Offset(4.dp.toPx(), 4.dp.toPx()),
-                )
-            }
         }
     }
 }

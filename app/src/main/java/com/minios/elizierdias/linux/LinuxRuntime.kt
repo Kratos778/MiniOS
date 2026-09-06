@@ -19,15 +19,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.util.concurrent.TimeUnit
 
 /**
  * Debian RootFS via PRoot.
  *
- * Android blocks execve on writable app dirs (files/, code_cache/) → error 13.
- * PRoot stack is shipped in the APK as jniLibs and runs from nativeLibraryDir:
- *   libproot.so + libproot_loader.so + libtalloc.so
+ * jniLibs: libproot.so + libproot_loader.so + libtalloc.so
+ * Runtime: copy libtalloc.so → libtalloc.so.2 (soname that proot needs).
  */
 class LinuxRuntime(
     private val context: Context,
@@ -45,6 +46,10 @@ class LinuxRuntime(
 
     private fun libDir(): File? =
         context.applicationInfo.nativeLibraryDir?.let { File(it) }
+
+    /** Writable dir with correctly named shared libs for the dynamic linker. */
+    private fun linkLibDir(): File =
+        File(context.codeCacheDir, "minios_libs").also { it.mkdirs() }
 
     fun prootFile(): File? =
         libDir()?.let { File(it, "libproot.so") }?.takeIf { it.isFile && it.length() > 20_000 }
@@ -73,6 +78,8 @@ class LinuxRuntime(
         appendLine("libproot.so: ${prootFile()?.let { "${it.absolutePath} (${it.length()}) exec=${it.canExecute()}" } ?: "MISSING"}")
         appendLine("libproot_loader.so: ${loaderFile()?.let { "${it.absolutePath} (${it.length()})" } ?: "MISSING"}")
         appendLine("libtalloc.so: ${tallocFile()?.let { "${it.absolutePath} (${it.length()})" } ?: "MISSING"}")
+        val t2 = File(linkLibDir(), "libtalloc.so.2")
+        appendLine("libtalloc.so.2: ${if (t2.isFile) "${t2.absolutePath} (${t2.length()})" else "MISSING"}")
         appendLine("rootfs: ${LinuxConfig.rootfsDir(context).absolutePath} installed=${isRootFsReady()}")
     }
 
@@ -86,6 +93,45 @@ class LinuxRuntime(
             }
         } catch (_: Exception) {
         }
+    }
+
+    private fun copyFile(from: File, to: File) {
+        to.parentFile?.mkdirs()
+        FileInputStream(from).use { input ->
+            FileOutputStream(to).use { output ->
+                input.copyTo(output)
+            }
+        }
+    }
+
+    /**
+     * proot NEEDED: libtalloc.so.2
+     * jniLibs only ships libtalloc.so → copy with the correct soname.
+     */
+    fun prepareLinkLibs(): File {
+        val dir = linkLibDir()
+        val src = tallocFile()
+        if (src != null) {
+            val dest = File(dir, "libtalloc.so.2")
+            if (!dest.exists() || dest.length() != src.length()) {
+                copyFile(src, dest)
+            }
+            dest.setReadable(true, false)
+            // also plain name for good measure
+            val plain = File(dir, "libtalloc.so")
+            if (!plain.exists() || plain.length() != src.length()) {
+                copyFile(src, plain)
+            }
+        }
+        // loader copy (some builds resolve relative to cwd)
+        loaderFile()?.let { srcLoader ->
+            val dest = File(dir, "libproot_loader.so")
+            if (!dest.exists() || dest.length() != srcLoader.length()) {
+                copyFile(srcLoader, dest)
+            }
+            forceExecutable(dest)
+        }
+        return dir
     }
 
     fun ensureDns() {
@@ -112,16 +158,15 @@ class LinuxRuntime(
                 if (proot == null) {
                     return@withContext Result.failure(
                         IllegalStateException(
-                            "libproot.so not in APK.\n" +
-                                diagnostic() +
-                                "\nReinstall MiniOS 0.3.7+ (uninstall old first).",
+                            "libproot.so not in APK.\n$diagnostic()",
                         ),
                     )
                 }
                 forceExecutable(proot)
                 loaderFile()?.let { forceExecutable(it) }
+                prepareLinkLibs()
                 ensureDns()
-                onProgress?.onProgress("PRoot OK (jniLibs)\n${diagnostic()}")
+                onProgress?.onProgress("PRoot OK\n${diagnostic()}")
                 Result.success(Unit)
             } catch (e: Exception) {
                 Result.failure(e)
@@ -165,10 +210,10 @@ class LinuxRuntime(
             }
         }
 
-    /** Build argv for proot. Does not include linker64 wrapper. */
     private fun prootArgv(command: String): List<String> {
         val proot = prootFile() ?: error("libproot.so missing")
         forceExecutable(proot)
+        prepareLinkLibs()
 
         val rootfs = LinuxConfig.rootfsDir(context).absolutePath
         val tmp = LinuxConfig.tmpDir(context).absolutePath
@@ -207,33 +252,36 @@ class LinuxRuntime(
     }
 
     private fun applyProotEnv(env: MutableMap<String, String>) {
-        val lib = libDir()?.absolutePath
+        val nativeLib = libDir()?.absolutePath
+        val linkLib = prepareLinkLibs().absolutePath
+
         env["PROOT_TMP_DIR"] = LinuxConfig.tmpDir(context).absolutePath
         env["HOME"] = "/root"
         env["TERM"] = "xterm-256color"
         env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         env["LANG"] = "C.UTF-8"
         env["USER"] = "root"
-        // Loader required by Termux/UserLAnd proot builds
-        loaderFile()?.let { env["PROOT_LOADER"] = it.absolutePath }
-        // talloc + any other jni libs
-        if (lib != null) {
-            env["LD_LIBRARY_PATH"] = lib
-        } else {
-            env.remove("LD_LIBRARY_PATH")
+
+        // Loader (UserLAnd / Termux proot)
+        val loader = loaderFile() ?: File(linkLibDir(), "libproot_loader.so")
+        if (loader.isFile) {
+            env["PROOT_LOADER"] = loader.absolutePath
         }
+
+        // Critical: libtalloc.so.2 must be on LD_LIBRARY_PATH
+        val paths = listOfNotNull(linkLib, nativeLib).distinct()
+        env["LD_LIBRARY_PATH"] = paths.joinToString(":")
     }
 
     private fun startProotProcess(command: String): Process {
         val argv = prootArgv(command)
 
-        // Strategy 1: direct exec of libproot.so (works when extracted from APK)
         try {
             val pb = ProcessBuilder(argv)
             applyProotEnv(pb.environment())
+            pb.redirectErrorStream(false)
             return pb.start()
         } catch (e1: Exception) {
-            // Strategy 2: system linker loads the ELF (bypass some exec restrictions)
             val linkerCandidates = listOf(
                 "/system/bin/linker64",
                 "/system/bin/linker",
@@ -269,14 +317,12 @@ class LinuxRuntime(
             }
             if (!isProotInstalled()) {
                 return@withContext Result.failure(
-                    IllegalStateException(
-                        "libproot.so missing from APK.\n${diagnostic()}\n" +
-                            "Uninstall MiniOS and install build 0.3.7+.",
-                    ),
+                    IllegalStateException("libproot.so missing.\n${diagnostic()}"),
                 )
             }
 
             ensureDns()
+            prepareLinkLibs()
             val process = startProotProcess(command)
 
             val stdout = StringBuilder()
@@ -313,13 +359,24 @@ class LinuxRuntime(
             outThread.join(5_000)
             errThread.join(5_000)
 
-            Result.success(
-                ExecResult(
-                    exitCode = process.exitValue(),
-                    stdout = stdout.toString().trimEnd(),
-                    stderr = stderr.toString().trimEnd(),
-                ),
+            val result = ExecResult(
+                exitCode = process.exitValue(),
+                stdout = stdout.toString().trimEnd(),
+                stderr = stderr.toString().trimEnd(),
             )
+
+            // Surface linker errors clearly
+            if (result.exitCode != 0 &&
+                result.stderr.contains("not found", ignoreCase = true)
+            ) {
+                return@withContext Result.failure(
+                    IllegalStateException(
+                        result.stderr + "\n" + diagnostic(),
+                    ),
+                )
+            }
+
+            Result.success(result)
         } catch (e: Exception) {
             Result.failure(e)
         }
