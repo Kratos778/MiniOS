@@ -28,7 +28,10 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Runs commands inside the Debian RootFS via PRoot (no root required).
- * Terminal-only subsystem — does not touch Desktop/wallpaper.
+ *
+ * CRITICAL: On modern Android, binaries under files/ and code_cache cannot be
+ * executed (error=13). PRoot must live in nativeLibraryDir as libproot.so
+ * (packaged via jniLibs in the APK).
  */
 class LinuxRuntime(
     private val context: Context,
@@ -44,18 +47,28 @@ class LinuxRuntime(
         val stderr: String,
     )
 
-    private fun prootCandidates(): List<File> = listOf(
-        File(context.codeCacheDir, "proot"),
-        File(context.noBackupFilesDir, "proot"),
-        LinuxConfig.prootFile(context),
-        File(context.applicationInfo.nativeLibraryDir, "libproot.so"),
-    )
+    /** Only nativeLibraryDir is reliably executable on Android 10+. */
+    fun bundledProot(): File? {
+        val libDir = context.applicationInfo.nativeLibraryDir ?: return null
+        val f = File(libDir, "libproot.so")
+        return if (f.isFile && f.length() > 10_000) f else null
+    }
 
-    fun resolveProot(): File? =
-        prootCandidates().firstOrNull { it.isFile && it.length() > 10_000 }
+    fun resolveProot(): File? {
+        // 1) Bundled in APK (the real fix for Permission denied)
+        bundledProot()?.let { return it }
 
-    fun isProotInstalled(): Boolean =
-        resolveProot() != null
+        // 2) Fallbacks (often blocked by SELinux — kept for older devices)
+        val fallbacks = listOf(
+            File(context.applicationInfo.nativeLibraryDir, "proot"),
+            File(context.codeCacheDir, "proot"),
+            File(context.noBackupFilesDir, "proot"),
+            LinuxConfig.prootFile(context),
+        )
+        return fallbacks.firstOrNull { it.isFile && it.length() > 10_000 }
+    }
+
+    fun isProotInstalled(): Boolean = resolveProot() != null
 
     fun isRootFsReady(): Boolean =
         LinuxConfig.installedMarker(context).isFile
@@ -69,13 +82,12 @@ class LinuxRuntime(
     private fun forceExecutable(file: File): Boolean {
         return try {
             file.setReadable(true, false)
-            file.setWritable(true, true)
             file.setExecutable(true, false)
             try {
-                Os.chmod(file.absolutePath, 493)
+                Os.chmod(file.absolutePath, 493) // 0755
             } catch (_: Exception) {
             }
-            file.canExecute() || file.length() > 10_000
+            true
         } catch (_: Exception) {
             false
         }
@@ -90,7 +102,6 @@ class LinuxRuntime(
         }
     }
 
-    /** DNS para apt / rede dentro do RootFS */
     fun ensureDns() {
         try {
             val etc = File(LinuxConfig.rootfsDir(context), "etc")
@@ -109,28 +120,32 @@ class LinuxRuntime(
         }
     }
 
+    /**
+     * Prefer bundled libproot.so. Only download to files/ as last resort
+     * (will still fail with error=13 on many devices).
+     */
     suspend fun ensureProot(onProgress: ProgressListener? = null): Result<Unit> =
         withContext(Dispatchers.IO) {
             try {
                 LinuxConfig.binDir(context).mkdirs()
                 LinuxConfig.tmpDir(context).mkdirs()
-                context.codeCacheDir.mkdirs()
-                context.noBackupFilesDir.mkdirs()
 
-                val existing = resolveProot()
-                if (existing != null) {
-                    forceExecutable(existing)
-                    val cacheCopy = File(context.codeCacheDir, "proot")
-                    if (existing.absolutePath != cacheCopy.absolutePath) {
-                        copyFile(existing, cacheCopy)
-                        forceExecutable(cacheCopy)
-                    }
+                val bundled = bundledProot()
+                if (bundled != null) {
+                    forceExecutable(bundled)
                     ensureDns()
-                    onProgress?.onProgress("PRoot already present (${existing.length()} bytes).")
+                    onProgress?.onProgress(
+                        "PRoot bundled OK (${bundled.length()} bytes)\n" +
+                            "path: ${bundled.absolutePath}",
+                    )
                     return@withContext Result.success(Unit)
                 }
 
-                onProgress?.onProgress("Downloading PRoot (aarch64)...")
+                onProgress?.onProgress(
+                    "AVISO: libproot.so não está no APK (jniLibs). " +
+                        "A tentar download (pode falhar com Permission denied)…",
+                )
+
                 val primary = LinuxConfig.prootFile(context)
                 downloadBinary(LinuxConfig.PROOT_URL, primary, onProgress).getOrThrow()
                 forceExecutable(primary)
@@ -139,17 +154,11 @@ class LinuxRuntime(
                 copyFile(primary, cacheProot)
                 forceExecutable(cacheProot)
 
-                val noBackupProot = File(context.noBackupFilesDir, "proot")
-                copyFile(primary, noBackupProot)
-                forceExecutable(noBackupProot)
-
-                val resolved = resolveProot()
-                    ?: return@withContext Result.failure(
-                        IllegalStateException("proot downloaded but not found on disk"),
-                    )
-
                 ensureDns()
-                onProgress?.onProgress("PRoot ready (${resolved.length()} bytes) @ ${resolved.parent}")
+                onProgress?.onProgress(
+                    "PRoot downloaded (${primary.length()} bytes). " +
+                        "Se deres error=13, reinstala APK build com jniLibs.",
+                )
                 Result.success(Unit)
             } catch (e: Exception) {
                 Result.failure(e)
@@ -159,25 +168,17 @@ class LinuxRuntime(
     suspend fun repairProot(onProgress: ProgressListener? = null): Result<Unit> =
         withContext(Dispatchers.IO) {
             try {
-                val src = resolveProot()
-                    ?: return@withContext Result.failure(
-                        IllegalStateException("PRoot missing. Run: setup-runtime"),
-                    )
-                onProgress?.onProgress("Repairing proot permissions...")
-                val targets = listOf(
-                    File(context.codeCacheDir, "proot"),
-                    File(context.noBackupFilesDir, "proot"),
-                    LinuxConfig.prootFile(context),
-                )
-                for (t in targets) {
-                    if (src.absolutePath != t.absolutePath) {
-                        copyFile(src, t)
-                    }
-                    forceExecutable(t)
-                    onProgress?.onProgress("chmod 0755 → ${t.absolutePath}")
+                val bundled = bundledProot()
+                if (bundled != null) {
+                    forceExecutable(bundled)
+                    ensureDns()
+                    onProgress?.onProgress("Using bundled libproot.so @ ${bundled.absolutePath}")
+                    return@withContext Result.success(Unit)
                 }
-                ensureDns()
-                Result.success(Unit)
+                onProgress?.onProgress(
+                    "libproot.so missing from APK. Rebuild with jniLibs or run setup-runtime.",
+                )
+                ensureProot(onProgress)
             } catch (e: Exception) {
                 Result.failure(e)
             }
@@ -209,23 +210,18 @@ class LinuxRuntime(
                 if (downloads != null) mounts += "/sdcard/Download" to downloads
                 if (dcim != null) mounts += "/sdcard/DCIM" to dcim
                 if (pictures != null) mounts += "/sdcard/Pictures" to pictures
-
-                context.getExternalFilesDir(null)?.let { appExt ->
-                    mounts += "/sdcard/MiniOS" to appExt
-                }
+                context.getExternalFilesDir(null)?.let { mounts += "/sdcard/MiniOS" to it }
 
                 for ((linuxPath, androidPath) in mounts) {
                     File(rootfs, linuxPath.removePrefix("/")).parentFile?.mkdirs()
-                    onProgress?.onProgress(
-                        "storage: $linuxPath → ${androidPath.absolutePath}",
-                    )
+                    onProgress?.onProgress("storage: $linuxPath → ${androidPath.absolutePath}")
                 }
 
                 val profileDir = File(rootfs, "root")
                 profileDir.mkdirs()
                 File(profileDir, ".minios_storage").writeText(
                     buildString {
-                        appendLine("# MiniOS storage binds (applied by proot -b)")
+                        appendLine("# MiniOS storage binds")
                         for ((linuxPath, androidPath) in mounts) {
                             appendLine("$linuxPath=${androidPath.absolutePath}")
                         }
@@ -235,7 +231,7 @@ class LinuxRuntime(
                 LinuxConfig.storageMarker(context).writeText("ok")
                 ensureDns()
                 onProgress?.onProgress("setup-storage: OK")
-                onProgress?.onProgress("Inside Linux use: ls /sdcard  or  ls /sdcard/Download")
+                onProgress?.onProgress("Inside Linux: ls /sdcard")
                 Result.success(Unit)
             } catch (e: Exception) {
                 Result.failure(e)
@@ -243,7 +239,7 @@ class LinuxRuntime(
         }
 
     fun buildProotCommand(command: String): List<String> {
-        val prootFile = resolveProot() ?: error("PRoot binary not found")
+        val prootFile = resolveProot() ?: error("PRoot binary not found (libproot.so)")
         forceExecutable(prootFile)
 
         val proot = prootFile.absolutePath
@@ -262,12 +258,6 @@ class LinuxRuntime(
             "-b", "/sys",
             "-b", "$tmp:/tmp",
         )
-
-        // Rede: /etc/resolv.conf do Android se existir
-        val androidResolv = File("/system/etc/resolv.conf")
-        if (androidResolv.exists()) {
-            args += listOf("-b", "${androidResolv.absolutePath}:/etc/resolv.conf")
-        }
 
         val external = Environment.getExternalStorageDirectory()
         if (external != null && external.exists()) {
@@ -302,13 +292,13 @@ class LinuxRuntime(
             }
             if (!isProotInstalled()) {
                 return@withContext Result.failure(
-                    IllegalStateException("PRoot missing. Run: setup-runtime"),
+                    IllegalStateException(
+                        "PRoot missing. Install APK built with jniLibs, then: setup-runtime",
+                    ),
                 )
             }
 
-            resolveProot()?.let { forceExecutable(it) }
             ensureDns()
-
             val cmd = buildProotCommand(command)
             val pb = ProcessBuilder(cmd)
             pb.redirectErrorStream(false)
@@ -323,27 +313,15 @@ class LinuxRuntime(
             val process = try {
                 pb.start()
             } catch (e: Exception) {
-                repairProot(null)
-                try {
-                    ProcessBuilder(buildProotCommand(command)).also { p ->
-                        p.redirectErrorStream(false)
-                        p.environment()["PROOT_TMP_DIR"] =
-                            LinuxConfig.tmpDir(context).absolutePath
-                        p.environment()["HOME"] = "/root"
-                        p.environment()["TERM"] = "xterm-256color"
-                        p.environment()["PATH"] =
-                            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-                        p.environment().remove("LD_LIBRARY_PATH")
-                    }.start()
-                } catch (e2: Exception) {
-                    return@withContext Result.failure(
-                        IllegalStateException(
-                            "Cannot execute proot (Permission denied). " +
-                                "Run: repair-proot\nDetail: ${e2.message}",
-                            e2,
-                        ),
-                    )
-                }
+                return@withContext Result.failure(
+                    IllegalStateException(
+                        "Cannot execute proot (Permission denied).\n" +
+                            "path tried: ${resolveProot()?.absolutePath}\n" +
+                            "bundled: ${bundledProot()?.absolutePath ?: "NONE — reinstall APK"}\n" +
+                            "Detail: ${e.message}",
+                        e,
+                    ),
+                )
             }
 
             val stdout = StringBuilder()
