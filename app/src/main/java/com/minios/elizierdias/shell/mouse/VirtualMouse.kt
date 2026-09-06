@@ -16,20 +16,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
 
 /**
- * Rato virtual do MiniOS.
+ * Rato virtual — camada full-screen por cima de janelas e taskbar.
  *
- * - Arrastar: move o cursor (mecânica original, inalterada)
- * - Duplo toque em qualquer sítio do ecrã: clique **na posição do cursor**
- *   (não debaixo dos dedos)
- * - Mouse OFF: não intercepta — touch normal
+ * - Arrastar: move o cursor
+ * - Duplo toque: clique na posição do **cursor** (não do dedo)
+ * - Mouse OFF: não desenha nem captura
  */
 @Composable
 fun VirtualMouse(
@@ -44,8 +46,8 @@ fun VirtualMouse(
     var cursor by remember { mutableStateOf(Offset.Zero) }
     var initialized by remember { mutableStateOf(false) }
     var originInWindow by remember { mutableStateOf(Offset.Zero) }
+    var areaSize by remember { mutableStateOf(Offset.Zero) }
 
-    // true = captura drag/tap; false = deixa passar o clique injetado para baixo
     var captureTouches by remember { mutableStateOf(true) }
     var pendingClick by remember { mutableStateOf(false) }
 
@@ -67,7 +69,7 @@ fun VirtualMouse(
         }
         val up = MotionEvent.obtain(
             downTime,
-            downTime + 50,
+            downTime + 40,
             MotionEvent.ACTION_UP,
             x,
             y,
@@ -85,12 +87,11 @@ fun VirtualMouse(
         }
     }
 
-    // Depois de desligar a captura, espera 1 frame e injeta o clique no cursor
     LaunchedEffect(pendingClick, captureTouches) {
         if (pendingClick && !captureTouches) {
-            delay(32)
+            delay(16)
             dispatchClickAtCursor()
-            delay(80)
+            delay(60)
             pendingClick = false
             captureTouches = true
         }
@@ -99,8 +100,10 @@ fun VirtualMouse(
     Canvas(
         modifier = modifier
             .fillMaxSize()
+            .zIndex(10_000f)
             .onGloballyPositioned { coords ->
                 originInWindow = coords.positionInWindow()
+                areaSize = Offset(coords.size.width.toFloat(), coords.size.height.toFloat())
                 if (!initialized && coords.size.width > 0 && coords.size.height > 0) {
                     cursor = Offset(
                         coords.size.width / 2f,
@@ -112,19 +115,17 @@ fun VirtualMouse(
             .then(
                 if (captureTouches) {
                     Modifier
-                        // Movimento — igual ao que já tinhas
                         .pointerInput(sensitivity) {
                             detectDragGestures { change, dragAmount ->
                                 change.consume()
                                 val next = cursor + dragAmount * sensitivity
                                 cursor = Offset(
-                                    next.x.coerceIn(0f, size.width.toFloat()),
-                                    next.y.coerceIn(0f, size.height.toFloat()),
+                                    next.x.coerceIn(0f, size.width.toFloat().coerceAtLeast(1f)),
+                                    next.y.coerceIn(0f, size.height.toFloat().coerceAtLeast(1f)),
                                 )
                                 initialized = true
                             }
                         }
-                        // Só duplo toque → clique na posição do cursor
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onDoubleTap = {
@@ -135,7 +136,6 @@ fun VirtualMouse(
                                         )
                                         initialized = true
                                     }
-                                    // Liberta a captura para o evento injetado chegar às apps
                                     pendingClick = true
                                     captureTouches = false
                                 },
@@ -151,21 +151,18 @@ fun VirtualMouse(
         val x = cursor.x
         val y = cursor.y
 
-        val line = 2.dp.toPx()
-        val length = 13.dp.toPx()
-
-        drawLine(Color.White, Offset(x, y), Offset(x, y + length), line)
-        drawLine(
-            Color.White,
-            Offset(x, y),
-            Offset(x + length * 0.75f, y + length * 0.75f),
-            line,
-        )
-        drawLine(
-            Color.Black,
-            Offset(x + 1.dp.toPx(), y + 2.dp.toPx()),
-            Offset(x + 1.dp.toPx(), y + length + 1.dp.toPx()),
-            line / 2,
-        )
+        // Cursor seta mais visível (por cima de tudo)
+        val path = Path().apply {
+            moveTo(x, y)
+            lineTo(x, y + 18.dp.toPx())
+            lineTo(x + 5.dp.toPx(), y + 14.dp.toPx())
+            lineTo(x + 10.dp.toPx(), y + 22.dp.toPx())
+            lineTo(x + 13.dp.toPx(), y + 20.dp.toPx())
+            lineTo(x + 7.dp.toPx(), y + 12.dp.toPx())
+            lineTo(x + 14.dp.toPx(), y + 12.dp.toPx())
+            close()
+        }
+        drawPath(path, Color.Black, style = Stroke(width = 3.dp.toPx()))
+        drawPath(path, Color.White)
     }
 }

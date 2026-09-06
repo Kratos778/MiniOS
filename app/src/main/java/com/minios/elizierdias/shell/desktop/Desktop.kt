@@ -34,6 +34,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.minios.elizierdias.apps.AppRegistry
@@ -88,107 +89,112 @@ fun Desktop() {
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .clipToBounds()
-                .onSizeChanged { size ->
-                    if (size.width > 0 && size.height > 0) {
-                        desktopSizePx = Size(size.width.toFloat(), size.height.toFloat())
-                    }
-                },
-        ) {
-            WallpaperLayer(
-                wallpaperUri = wallpaperUri,
-                wallpaperVersion = wallpaperVersion,
-                gradientBrush = wallpaper.brush,
-                videoSound = wallpaperVideoSound,
-            )
-
-            Column(
+    // Root: UI + mouse overlay (mouse ALWAYS on top when enabled)
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            Box(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clipToBounds()
+                    .onSizeChanged { size ->
+                        if (size.width > 0 && size.height > 0) {
+                            desktopSizePx = Size(size.width.toFloat(), size.height.toFloat())
+                        }
+                    },
             ) {
-                AppRegistry.all.forEach { app ->
-                    DesktopIcon(app = app, onOpen = {
-                        startMenuOpen = false
-                        launchApp(app)
-                    })
-                }
-            }
+                WallpaperLayer(
+                    wallpaperUri = wallpaperUri,
+                    wallpaperVersion = wallpaperVersion,
+                    gradientBrush = wallpaper.brush,
+                    videoSound = wallpaperVideoSound,
+                )
 
-            // Só janelas NÃO minimizadas — evita Settings invisível a capturar cliques/galeria
-            windowManager.windows
-                .filter { !it.isMinimized }
-                .sortedBy { it.zIndex }
-                .forEach { window ->
-                    key(window.instanceId) {
-                        WindowFrame(
-                            window = window,
-                            onFocus = { windowManager.focus(window.instanceId) },
-                            onMove = { pos -> windowManager.move(window.instanceId, pos) },
-                            onResize = { size -> windowManager.resize(window.instanceId, size) },
-                            onClose = { windowManager.close(window.instanceId) },
-                            onMinimize = { windowManager.minimize(window.instanceId) },
-                            onToggleMaximize = {
-                                windowManager.toggleMaximize(window.instanceId, desktopSizePx)
-                            },
-                        ) {
-                            when (window.app.id) {
-                                "files" -> FilesApp()
-                                "terminal" -> TerminalApp()
-                                "settings" -> SettingsApp()
-                                "software_center" -> SoftwareCenterApp()
-                                "browser" -> BrowserApp()
-                                "media_player" -> MediaPlayerOS()
-                                else -> Text("App: ${window.app.id}", color = Color.White)
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    AppRegistry.all.forEach { app ->
+                        DesktopIcon(app = app, onOpen = {
+                            startMenuOpen = false
+                            launchApp(app)
+                        })
+                    }
+                }
+
+                windowManager.windows
+                    .filter { !it.isMinimized }
+                    .sortedBy { it.zIndex }
+                    .forEach { window ->
+                        key(window.instanceId) {
+                            WindowFrame(
+                                window = window,
+                                onFocus = { windowManager.focus(window.instanceId) },
+                                onMove = { pos -> windowManager.move(window.instanceId, pos) },
+                                onResize = { size -> windowManager.resize(window.instanceId, size) },
+                                onClose = { windowManager.close(window.instanceId) },
+                                onMinimize = { windowManager.minimize(window.instanceId) },
+                                onToggleMaximize = {
+                                    windowManager.toggleMaximize(window.instanceId, desktopSizePx)
+                                },
+                            ) {
+                                when (window.app.id) {
+                                    "files" -> FilesApp()
+                                    "terminal" -> TerminalApp()
+                                    "settings" -> SettingsApp()
+                                    "software_center" -> SoftwareCenterApp()
+                                    "browser" -> BrowserApp()
+                                    "media_player" -> MediaPlayerOS()
+                                    else -> Text("App: ${window.app.id}", color = Color.White)
+                                }
                             }
                         }
                     }
-                }
 
-            if (startMenuOpen) {
-                StartMenu(
-                    apps = AppRegistry.all,
-                    onAppClick = { app ->
-                        startMenuOpen = false
-                        launchApp(app)
-                    },
-                    onDismiss = { startMenuOpen = false },
-                )
+                if (startMenuOpen) {
+                    StartMenu(
+                        apps = AppRegistry.all,
+                        onAppClick = { app ->
+                            startMenuOpen = false
+                            launchApp(app)
+                        },
+                        onDismiss = { startMenuOpen = false },
+                    )
+                }
             }
 
-            VirtualMouse(
-                enabled = mouseEnabled,
-                modifier = Modifier.fillMaxSize(),
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(TaskbarHeight),
+            ) {
+                Taskbar(
+                    openWindows = windowManager.windows,
+                    mouseEnabled = mouseEnabled,
+                    onMouseToggle = { mouseEnabled = it },
+                    onStartClick = { startMenuOpen = !startMenuOpen },
+                    onWindowClick = { id ->
+                        val window = windowManager.windows.firstOrNull { it.instanceId == id }
+                            ?: return@Taskbar
+                        if (window.isFocused && !window.isMinimized) {
+                            windowManager.minimize(id)
+                        } else {
+                            windowManager.restore(id)
+                        }
+                    },
+                )
+            }
         }
 
-        Box(
+        // Full-screen mouse layer — above windows AND taskbar
+        VirtualMouse(
+            enabled = mouseEnabled,
             modifier = Modifier
-                .fillMaxWidth()
-                .height(TaskbarHeight),
-        ) {
-            Taskbar(
-                openWindows = windowManager.windows,
-                mouseEnabled = mouseEnabled,
-                onMouseToggle = { mouseEnabled = it },
-                onStartClick = { startMenuOpen = !startMenuOpen },
-                onWindowClick = { id ->
-                    val window = windowManager.windows.firstOrNull { it.instanceId == id }
-                        ?: return@Taskbar
-                    if (window.isFocused && !window.isMinimized) {
-                        windowManager.minimize(id)
-                    } else {
-                        windowManager.restore(id)
-                    }
-                },
-            )
-        }
+                .fillMaxSize()
+                .zIndex(10_000f),
+        )
     }
 }
 
