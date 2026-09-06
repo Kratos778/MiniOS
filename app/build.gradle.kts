@@ -11,11 +11,10 @@ android {
         applicationId = "com.minios.elizierdias"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.3.6"
+        versionCode = 3
+        versionName = "0.3.7"
         vectorDrawables { useSupportLibrary = true }
         ndk {
-            // proot only shipped for arm64 (real devices)
             abiFilters += listOf("arm64-v8a")
         }
     }
@@ -39,54 +38,93 @@ android {
     composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }
-        // Extract .so from APK so ProcessBuilder can exec libproot.so
         jniLibs {
+            // Must extract .so so ProcessBuilder can execve them
             useLegacyPackaging = true
         }
     }
 }
 
-// ─── Download PRoot into jniLibs (executable path on Android) ───
-val prootJniDir = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
-val prootLibFile = prootJniDir.file("libproot.so")
-val prootUrl =
-    "https://skirsten.github.io/proot-portable-android-binaries/aarch64/proot"
+// ─── Bundle PRoot stack (UserLAnd arm64) into jniLibs ───
+val jniArm64 = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
+val prootSo = jniArm64.file("libproot.so")
+val loaderSo = jniArm64.file("libproot_loader.so")
+val tallocSo = jniArm64.file("libtalloc.so")
+val userlandZipUrl =
+    "https://github.com/CypherpunkArmory/UserLAnd-Assets-Support/releases/download/v1.5.1/arm64-v8a-assets.zip"
 
-val downloadProot by tasks.registering {
-    description = "Download static PRoot aarch64 as libproot.so for jniLibs"
-    outputs.file(prootLibFile)
+val downloadProotStack by tasks.registering {
+    description = "Download UserLAnd proot+loader+talloc into jniLibs"
+    outputs.files(prootSo, loaderSo, tallocSo)
     doLast {
-        val out = prootLibFile.asFile
-        out.parentFile.mkdirs()
-        if (out.exists() && out.length() > 100_000L) {
-            println("PRoot already present: ${out.length()} bytes")
+        val outDir = jniArm64.asFile
+        outDir.mkdirs()
+        val proot = prootSo.asFile
+        val loader = loaderSo.asFile
+        val talloc = tallocSo.asFile
+
+        if (proot.exists() && proot.length() > 50_000 &&
+            loader.exists() && loader.length() > 5_000 &&
+            talloc.exists() && talloc.length() > 10_000
+        ) {
+            println("PRoot stack already present in jniLibs")
             return@doLast
         }
-        println("Downloading PRoot from $prootUrl …")
+
+        val tmpZip = File(outDir, "_ul_assets.zip")
+        val tmpDir = File(outDir, "_ul_extract")
+        tmpDir.mkdirs()
+
+        println("Downloading UserLAnd arm64 assets…")
         ant.invokeMethod(
             "get",
+            mapOf("src" to userlandZipUrl, "dest" to tmpZip, "skipexisting" to false),
+        )
+        if (!tmpZip.exists() || tmpZip.length() < 1_000_000) {
+            throw GradleException("Failed to download UserLAnd assets (${tmpZip.length()} bytes)")
+        }
+
+        // Unzip needed entries
+        ant.invokeMethod(
+            "unzip",
             mapOf(
-                "src" to prootUrl,
-                "dest" to out,
-                "skipexisting" to false,
+                "src" to tmpZip,
+                "dest" to tmpDir,
+                "overwrite" to true,
             ),
         )
-        if (!out.exists() || out.length() < 100_000L) {
-            throw GradleException(
-                "Failed to download PRoot (size=${out.length()}). Check network.",
-            )
+
+        fun findFile(name: String): File {
+            val matches = tmpDir.walkTopDown().filter { it.isFile && it.name == name }.toList()
+            if (matches.isEmpty()) throw GradleException("Missing $name in UserLAnd zip")
+            return matches.first()
         }
-        // ELF magic check
-        val magic = out.inputStream().use { it.readNBytes(4) }
-        if (magic[0] != 0x7f.toByte() || magic[1] != 'E'.code.toByte()) {
-            out.delete()
-            throw GradleException("Downloaded file is not an ELF binary")
+
+        val srcProot = findFile("proot")
+        val srcLoader = findFile("loader")
+        val srcTalloc = tmpDir.walkTopDown()
+            .filter { it.isFile && (it.name == "libtalloc.so.2" || it.name.startsWith("libtalloc")) }
+            .firstOrNull() ?: throw GradleException("Missing libtalloc in UserLAnd zip")
+
+        srcProot.copyTo(proot, overwrite = true)
+        srcLoader.copyTo(loader, overwrite = true)
+        srcTalloc.copyTo(talloc, overwrite = true)
+
+        // Sanity: ELF magic
+        listOf(proot, loader, talloc).forEach { f ->
+            val magic = f.inputStream().use { it.readNBytes(4) }
+            if (magic[0] != 0x7f.toByte() || magic[1] != 'E'.code.toByte()) {
+                throw GradleException("${f.name} is not ELF")
+            }
+            println("OK ${f.name} (${f.length()} bytes)")
         }
-        println("PRoot ready: ${out.absolutePath} (${out.length()} bytes)")
+
+        tmpZip.delete()
+        tmpDir.deleteRecursively()
     }
 }
 
-tasks.named("preBuild").configure { dependsOn(downloadProot) }
+tasks.named("preBuild").configure { dependsOn(downloadProotStack) }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
