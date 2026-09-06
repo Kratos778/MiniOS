@@ -45,7 +45,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.minios.elizierdias.linux.LinuxConfig
 import com.minios.elizierdias.linux.LinuxManager
 import com.minios.elizierdias.linux.LinuxRootFs
 import com.minios.elizierdias.linux.LinuxSession
@@ -103,18 +102,18 @@ fun TerminalApp() {
                 "(${status.distro ?: "—"}) " +
                 LinuxRootFs.formatSize(status.estimatedSizeBytes),
         )
-        lines.add("proot  : ${if (rt.isProotInstalled()) "ok" else "em falta"}")
+        lines.add("proot  : ${if (rt.isProotInstalled()) "ok (jniLibs)" else "MISSING — reinstall APK 0.3.7+"}")
         lines.add("storage: ${if (rt.isStorageReady()) "ok" else "corre setup-storage"}")
+        rt.diagnostic().lines().forEach { lines.add(it) }
         lines.add("")
         if (!status.isInstalled) {
             lines.add("1) install")
             lines.add("2) setup-runtime")
             lines.add("3) setup-storage")
         } else if (!rt.isProotInstalled()) {
-            lines.add("Próximo: setup-runtime")
+            lines.add("libproot.so em falta no APK — desinstala e instala build novo")
         } else {
-            lines.add("Linux pronto. Permission denied → repair-proot")
-            lines.add("cd persiste na sessão. Exemplos: uname -a | ls / | cd /sdcard")
+            lines.add("Linux pronto. Exemplos: uname -a | ls / | cd /sdcard")
             session = linuxManager.startSession()
             promptCwd = session?.cwd ?: "/root"
         }
@@ -147,15 +146,8 @@ fun TerminalApp() {
         val cmd = normalizeBuiltin(raw)
         when (cmd) {
             "help" -> {
-                lines.add("Setup:")
-                lines.add("  install | setup-runtime | setup-storage | repair-proot | status")
-                lines.add("")
-                lines.add("Sessão (cwd/env persistem):")
-                lines.add("  cd /path | pwd | export NAME=value")
-                lines.add("  uname -a | ls / | cat /etc/os-release")
-                lines.add("  ls /sdcard | ls /sdcard/Download")
-                lines.add("")
-                lines.add("Ainda não: PTY interativo (python REPL, etc.)")
+                lines.add("Setup: install | setup-runtime | setup-storage | status")
+                lines.add("Linux: uname -a | ls / | cd /sdcard | pwd")
                 lines.add("")
                 return true
             }
@@ -169,17 +161,13 @@ fun TerminalApp() {
                     val s = linuxManager.rootFsStatus.value
                     val rt = linuxManager.getRuntime()
                     lines.add(statusMessage)
-                    lines.add("enabled : ${LinuxConfig.enabled}")
                     lines.add("ready   : $isReady")
                     lines.add("cwd     : ${session?.cwd ?: promptCwd}")
                     if (s != null) {
                         lines.add("rootfs  : ${s.rootfsPath}")
-                        lines.add("installed: ${s.isInstalled} (${s.distro ?: "—"})")
-                        lines.add("size    : ${LinuxRootFs.formatSize(s.estimatedSizeBytes)}")
+                        lines.add("installed: ${s.isInstalled}")
                     }
-                    lines.add("proot   : ${if (rt.isProotInstalled()) "ok" else "no"}")
-                    lines.add("storage : ${if (rt.isStorageReady()) "ok" else "no"}")
-                    lines.add("proot path: ${rt.resolveProot()?.absolutePath ?: "—"}")
+                    rt.diagnostic().lines().forEach { lines.add(it) }
                     lines.add("")
                     scrollToBottom()
                 }
@@ -218,7 +206,7 @@ fun TerminalApp() {
                     val r = linuxManager.setupRuntime()
                     busy = false
                     if (r.isSuccess) {
-                        lines.add("✓ PRoot OK")
+                        lines.add("✓ PRoot OK (jniLibs)")
                         session = linuxManager.startSession()
                         promptCwd = session?.cwd ?: "/root"
                         lines.add("Sessão Linux ativa.")
@@ -240,7 +228,7 @@ fun TerminalApp() {
                     val r = linuxManager.repairProot()
                     busy = false
                     lines.add(
-                        if (r.isSuccess) "✓ repair-proot OK — tenta: uname -a"
+                        if (r.isSuccess) "✓ repair OK — tenta: uname -a"
                         else "✗ ${r.exceptionOrNull()?.message}",
                     )
                     lines.add("")
