@@ -18,6 +18,7 @@ class LinuxManager(
 
     private val rootFs = LinuxRootFs(context)
     private val runtime = LinuxRuntime(context)
+    private val packageManager = LinuxPackageManager(runtime)
 
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
@@ -43,8 +44,14 @@ class LinuxManager(
         val prootOk = runtime.isProotInstalled()
 
         if (rootOk) {
-            // Sempre corrigir DNS ao abrir o terminal
             runtime.ensureDns()
+            // Bootstrap pesado só se ainda não marcado (não em todo arranque)
+            if (!LinuxConfig.bootstrapMarker(context).isFile && prootOk) {
+                _statusMessage.value = "[Linux] a reparar dpkg (primeira vez)..."
+                runtime.ensureDebianBootstrap(force = false) { msg ->
+                    _installProgress.value = msg
+                }
+            }
         }
 
         when {
@@ -84,11 +91,15 @@ class LinuxManager(
         _installProgress.value = "Wiping old RootFS..."
         _statusMessage.value = "Wiping old RootFS..."
         rootFs.clearInstalledMarker()
+        try {
+            LinuxConfig.bootstrapMarker(context).delete()
+        } catch (_: Exception) {
+        }
         rootFs.wipeRootFs().getOrElse { e ->
             return Result.failure(e)
         }
 
-        _installProgress.value = "Reinstalling RootFS (symlinks included)..."
+        _installProgress.value = "Reinstalling RootFS..."
         val result = rootFs.install { msg ->
             _installProgress.value = msg
             _statusMessage.value = msg
@@ -109,6 +120,9 @@ class LinuxManager(
         }
         if (result.isSuccess && rootFs.isInstalled()) {
             runtime.ensureDns()
+            runtime.ensureDebianBootstrap(force = false) { msg ->
+                _installProgress.value = msg
+            }
             _isReady.value = true
             LinuxConfig.setEnabled(true)
             _statusMessage.value = "Linux ready (RootFS + PRoot)"
@@ -126,6 +140,15 @@ class LinuxManager(
             runtime.ensureDns()
             _isReady.value = true
             LinuxConfig.setEnabled(true)
+        }
+        return result
+    }
+
+    suspend fun repairDpkg(): Result<String> {
+        _installProgress.value = "[DPKG] reparação..."
+        val result = runtime.repairDpkg { msg ->
+            _installProgress.value = msg
+            _statusMessage.value = msg
         }
         return result
     }
@@ -156,6 +179,7 @@ class LinuxManager(
 
     fun getRootFs(): LinuxRootFs = rootFs
     fun getRuntime(): LinuxRuntime = runtime
+    fun getPackageManager(): LinuxPackageManager = packageManager
 
     fun startSession(): LinuxSession {
         val session = LinuxSession(runtime)
