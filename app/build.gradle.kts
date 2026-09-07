@@ -3,20 +3,35 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+import java.util.Properties
+
 android {
     namespace = "com.minios.elizierdias"
     compileSdk = 34
 
     defaultConfig {
-        // Um so package — updates sobrescrevem sem desinstalar (RootFS preservado)
+        // Mesmo package sempre — update em cima sem desinstalar (RootFS preservado)
         applicationId = "com.minios.elizierdias"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.3.9"
+        versionCode = 6
+        versionName = "0.4.0"
         vectorDrawables { useSupportLibrary = true }
         ndk {
             abiFilters += listOf("arm64-v8a")
+        }
+    }
+
+    // Assinatura ESTAVEL no CI (mesmo keystore em todos os builds)
+    val debugKeystore = file("keystore/minios-debug.jks")
+    signingConfigs {
+        create("miniosDebug") {
+            if (debugKeystore.exists()) {
+                storeFile = debugKeystore
+                storePassword = "miniosdebug"
+                keyAlias = "minios"
+                keyPassword = "miniosdebug"
+            }
         }
     }
 
@@ -30,8 +45,10 @@ android {
             )
         }
         debug {
-            // SEM applicationIdSuffix — mesmo package que release
-            // para o APK do Actions atualizar em cima sem apagar dados/RootFS
+            // SEM applicationIdSuffix
+            if (debugKeystore.exists()) {
+                signingConfig = signingConfigs.getByName("miniosDebug")
+            }
         }
     }
 

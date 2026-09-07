@@ -12,17 +12,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore stable debug keystore
+        run: |
+          mkdir -p app/keystore
+          if [ -f app/keystore/minios-debug.jks.b64 ]; then
+            base64 -d app/keystore/minios-debug.jks.b64 > app/keystore/minios-debug.jks
+            echo "Keystore restored ($(wc -c < app/keystore/minios-debug.jks) bytes)"
+          else
+            echo "WARNING: minios-debug.jks.b64 missing — using default debug key"
+          fi
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
       - name: Build debug APK
         run: gradle assembleDebug --stacktrace
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
