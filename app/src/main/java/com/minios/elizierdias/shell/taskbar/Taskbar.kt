@@ -7,15 +7,17 @@
 
 package com.minios.elizierdias.shell.taskbar
 
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.IntentFilter
-import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.os.Build
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,10 +39,10 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.NetworkCell
 import androidx.compose.material.icons.filled.SignalWifi4Bar
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
@@ -82,6 +84,26 @@ private val OnSurfaceDim = Color(0xFFC8C8C8)
 private val FlyoutBg = Color(0xF22C2C2C)
 private val ExitRed = Color(0xFFF85149)
 
+private fun Context.findActivity(): Activity? {
+    var ctx: Context? = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
+private fun applyWindowBrightness(activity: Activity?, value: Float) {
+    val a = activity ?: return
+    // 0.01..1.0 — 0 means "use system"
+    val level = value.coerceIn(0.01f, 1f)
+    a.runOnUiThread {
+        val lp = a.window.attributes
+        lp.screenBrightness = level
+        a.window.attributes = lp
+    }
+}
+
 @Composable
 fun Taskbar(
     openWindows: List<MiniWindow>,
@@ -92,6 +114,7 @@ fun Taskbar(
     onExitMiniOS: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
 
     var batteryLevel by remember { mutableIntStateOf(readBatteryLevel(context)) }
     var charging by remember { mutableStateOf(isCharging(context)) }
@@ -107,15 +130,11 @@ fun Taskbar(
         mutableStateOf(SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(Date()))
     }
 
-    val audioManager = remember {
-        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    }
-    val maxVol = remember {
-        audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-    }
-    var volume by remember {
+    // Luminosidade da janela MiniOS (nao precisa de WRITE_SETTINGS)
+    var brightness by remember {
         mutableFloatStateOf(
-            audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / maxVol,
+            activity?.window?.attributes?.screenBrightness
+                ?.takeIf { it in 0.01f..1f } ?: 0.7f,
         )
     }
 
@@ -188,6 +207,7 @@ fun Taskbar(
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
+                // So estado — Android bloqueia toggle WiFi/BT a apps normais
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -204,31 +224,30 @@ fun Taskbar(
                         onClick = {
                             connected = isNetworkConnected(context)
                             wifi = isWifi(context)
-                            statusNote = when {
-                                !connected -> "Sem ligacao"
-                                wifi -> "Wi-Fi ativo"
-                                else -> "Dados moveis ativos"
-                            }
+                            statusNote = "Estado: " + when {
+                                !connected -> "offline"
+                                wifi -> "Wi-Fi"
+                                else -> "dados"
+                            } + " (liga no painel do telefone)"
                         },
                     )
                     QuickTile(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Filled.NetworkCell,
-                        label = "Internet",
+                        label = if (connected) "Online" else "Offline",
                         active = connected,
                         onClick = {
                             connected = isNetworkConnected(context)
-                            wifi = isWifi(context)
                             statusNote = if (connected) "Online" else "Offline"
                         },
                     )
                     QuickTile(
                         modifier = Modifier.weight(1f),
                         icon = Icons.Filled.Bluetooth,
-                        label = "Bluetooth",
+                        label = "BT",
                         active = false,
                         onClick = {
-                            statusNote = "Bluetooth: so estado (sem sair do MiniOS)"
+                            statusNote = "BT: so estado (Android nao deixa apps normais ligar)"
                         },
                     )
                 }
@@ -260,27 +279,34 @@ fun Taskbar(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
+                // Luminosidade (nao volume — volume = botoes fisicos)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        Icons.Filled.VolumeUp,
-                        contentDescription = null,
+                        Icons.Filled.Brightness6,
+                        contentDescription = "Luminosidade",
                         tint = OnSurface,
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Slider(
-                        value = volume,
+                        value = brightness,
                         onValueChange = { v ->
-                            volume = v
-                            val level = (v * maxVol).toInt().coerceIn(0, maxVol)
-                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0)
+                            brightness = v
+                            applyWindowBrightness(activity, v)
                         },
+                        valueRange = 0.05f..1f,
                         modifier = Modifier.weight(1f),
                         colors = SliderDefaults.colors(
                             thumbColor = Accent,
                             activeTrackColor = Accent,
                             inactiveTrackColor = Color(0x44FFFFFF),
                         ),
+                    )
+                    Text(
+                        text = "${(brightness * 100).toInt()}%",
+                        color = OnSurfaceDim,
+                        fontSize = 11.sp,
+                        modifier = Modifier.width(36.dp),
                     )
                 }
 
@@ -328,7 +354,6 @@ fun Taskbar(
 
         Spacer(modifier = Modifier.width(4.dp))
 
-        // Botao SAIR sempre visivel
         Row(
             modifier = Modifier
                 .height(32.dp)
