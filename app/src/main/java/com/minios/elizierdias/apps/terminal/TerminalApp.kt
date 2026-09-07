@@ -75,7 +75,6 @@ fun TerminalApp() {
         )
     }
 
-    // Um unico bloco de texto — SelectionContainer consegue selecionar tudo, nao so o visivel
     val fullText = remember(lines.size, lines.lastOrNull()) {
         lines.joinToString("\n")
     }
@@ -122,11 +121,12 @@ fun TerminalApp() {
             lines.add("2) setup-runtime")
             lines.add("3) setup-storage")
             lines.add("4) setup-dns")
+            lines.add("5) repair-dpkg  (se dpkg interrupted)")
         } else if (!rt.isProotInstalled()) {
             lines.add("libproot.so em falta — reinstala o APK")
         } else {
-            lines.add("Linux pronto. setup-dns | apt update | uname -a")
-            lines.add("Segura o texto para copiar, ou toca em Copiar")
+            lines.add("Linux pronto. setup-dns | repair-dpkg | apt update | uname -a")
+            lines.add("pkg-install python3  |  Segura texto ou toca Copiar")
             session = linuxManager.startSession()
             promptCwd = session?.cwd ?: "/root"
         }
@@ -159,6 +159,8 @@ fun TerminalApp() {
                 "reinstall-rootfs"
             "setup-dns", "setupdns", "fix-dns", "dns" ->
                 "setup-dns"
+            "repair-dpkg", "repairdpkg", "fix-dpkg", "dpkg-configure" ->
+                "repair-dpkg"
             else -> cmd.trim()
         }
     }
@@ -169,7 +171,8 @@ fun TerminalApp() {
             "help" -> {
                 lines.add("Setup:")
                 lines.add("  install | reinstall-rootfs | setup-runtime | setup-storage")
-                lines.add("  setup-dns | repair-proot | status | clear")
+                lines.add("  setup-dns | repair-dpkg | repair-proot | status | clear")
+                lines.add("  pkg-install <nome> | pkg-update  (APT idempotente)")
                 lines.add("Linux: uname -a | ls / | cd /sdcard | apt update")
                 lines.add("")
                 return true
@@ -282,6 +285,46 @@ fun TerminalApp() {
                 }
                 return true
             }
+            "repair-dpkg" -> {
+                if (busy) {
+                    lines.add("ocupado...")
+                    return true
+                }
+                busy = true
+                scope.launch {
+                    lines.add("[DPKG] a reparar (configure -a / apt -f)...")
+                    scrollToBottom()
+                    val r = linuxManager.repairDpkg()
+                    busy = false
+                    if (r.isSuccess) {
+                        r.getOrNull()?.lines()?.forEach { lines.add(it) }
+                        lines.add("✓ repair-dpkg OK — tenta: apt-get update")
+                    } else {
+                        lines.add("✗ ${r.exceptionOrNull()?.message}")
+                    }
+                    lines.add("")
+                    scrollToBottom()
+                }
+                return true
+            }
+            "pkg-update" -> {
+                if (busy) {
+                    lines.add("ocupado...")
+                    return true
+                }
+                busy = true
+                scope.launch {
+                    val r = linuxManager.getPackageManager().update { msg ->
+                        lines.add(msg)
+                        scrollToBottom()
+                    }
+                    busy = false
+                    lines.add(r.message)
+                    lines.add("")
+                    scrollToBottom()
+                }
+                return true
+            }
             "repair-proot" -> {
                 if (busy) {
                     lines.add("ocupado...")
@@ -327,6 +370,33 @@ fun TerminalApp() {
         if (cmd.isBlank()) {
             lines.add("")
             scrollToBottom()
+            return
+        }
+        val lower = cmd.lowercase()
+        if (lower.startsWith("pkg-install ") || lower == "pkg-install") {
+            val pkg = cmd.removePrefix("pkg-install").removePrefix("PKG-INSTALL").trim()
+            if (pkg.isEmpty()) {
+                lines.add("[INSTALL] uso: pkg-install <pacote>")
+                lines.add("")
+                scrollToBottom()
+                return
+            }
+            if (busy) {
+                lines.add("ocupado...")
+                scrollToBottom()
+                return
+            }
+            busy = true
+            scope.launch {
+                val r = linuxManager.getPackageManager().install(pkg) { msg ->
+                    lines.add(msg)
+                    scrollToBottom()
+                }
+                busy = false
+                lines.add(r.message)
+                lines.add("")
+                scrollToBottom()
+            }
             return
         }
         if (runBuiltin(cmd)) {
@@ -393,7 +463,6 @@ fun TerminalApp() {
             )
         }
 
-        // Column + scroll + um Text unico = selecao cobre o historico inteiro
         SelectionContainer(
             modifier = Modifier
                 .weight(1f)
