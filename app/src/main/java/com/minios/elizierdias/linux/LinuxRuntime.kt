@@ -115,6 +115,7 @@ class LinuxRuntime(
         val root = LinuxConfig.rootfsDir(context)
         appendLine("rootfs: ${root.absolutePath}")
         appendLine("rootfs installed marker: ${LinuxConfig.installedMarker(context).isFile}")
+        appendLine("bootstrap marker: ${LinuxConfig.bootstrapMarker(context).isFile}")
         appendLine("/root: ${File(root, "root").isDirectory}")
         appendLine("shell: ${resolveShellPath(root) ?: "MISSING"}")
         val resolv = File(root, "etc/resolv.conf")
@@ -190,10 +191,6 @@ class LinuxRuntime(
         }
     }
 
-    /**
-     * Always write a real /etc/resolv.conf for PRoot.
-     * proot-distro uses a systemd-resolved symlink that does not exist here.
-     */
     fun ensureDns(): String {
         return try {
             val root = LinuxConfig.rootfsDir(context)
@@ -218,14 +215,12 @@ class LinuxRuntime(
                 )
             }
 
-            // Garantir resolucao via ficheiros + DNS (nao so mdns/resolve)
             val nss = File(etc, "nsswitch.conf")
             if (nss.isFile) {
                 val nssText = nss.readText()
                 if (!nssText.contains("hosts:")) {
                     nss.appendText("\nhosts:          files dns\n")
-                } else if (!nssText.contains("hosts:") ||
-                    !nssText.lineSequence().any {
+                } else if (!nssText.lineSequence().any {
                         it.trimStart().startsWith("hosts:") && it.contains("dns")
                     }
                 ) {
@@ -256,7 +251,6 @@ class LinuxRuntime(
                 }
                 val msg = ensureDns()
                 onProgress?.onProgress(msg)
-                // Teste de resolucao dentro do PRoot
                 val test = exec(
                     "getent hosts deb.debian.org || getent hosts one.one.one.one || true",
                     timeoutSec = 15,
@@ -336,6 +330,89 @@ class LinuxRuntime(
             }
         }
 
+    /**
+     * Recover interrupted dpkg without wiping RootFS.
+     */
+    suspend fun repairDpkg(onProgress: ProgressListener? = null): Result<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                if (!isRootFsReady() || !isProotInstalled()) {
+                    return@withContext Result.failure(
+                        IllegalStateException("[DPKG] RootFS/PRoot not ready"),
+                    )
+                }
+                ensureDns()
+                prepareLinkLibs()
+                val log = StringBuilder()
+                val steps = listOf(
+                    "dpkg --audit" to 60L,
+                    "dpkg --configure -a" to 600L,
+                    "apt-get -f install -y" to 600L,
+                    "dpkg --configure -a" to 300L,
+                )
+                for ((cmd, to) in steps) {
+                    onProgress?.onProgress("[DPKG] $cmd")
+                    log.appendLine("[DPKG] $cmd")
+                    val process = startProotProcess("DEBIAN_FRONTEND=noninteractive $cmd")
+                    val stdout = StringBuilder()
+                    val stderr = StringBuilder()
+                    val outT = Thread {
+                        process.inputStream.bufferedReader().use { br ->
+                            br.forEachLine { stdout.appendLine(it) }
+                        }
+                    }
+                    val errT = Thread {
+                        process.errorStream.bufferedReader().use { br ->
+                            br.forEachLine { stderr.appendLine(it) }
+                        }
+                    }
+                    outT.start()
+                    errT.start()
+                    if (!process.waitFor(to, TimeUnit.SECONDS)) {
+                        process.destroyForcibly()
+                        log.appendLine("[ERROR] timeout: $cmd")
+                        try {
+                            LinuxConfig.bootstrapMarker(context).delete()
+                        } catch (_: Exception) {
+                        }
+                        return@withContext Result.failure(
+                            IllegalStateException("[DPKG] timeout: $cmd\n$log"),
+                        )
+                    }
+                    outT.join(3000)
+                    errT.join(3000)
+                    if (stdout.isNotBlank()) log.appendLine(stdout.toString().trimEnd())
+                    if (stderr.isNotBlank()) log.appendLine(stderr.toString().trimEnd())
+                    log.appendLine("[DPKG] exit=${process.exitValue()}")
+                }
+                LinuxConfig.bootstrapMarker(context).writeText("ok")
+                val msg = log.toString().trim()
+                onProgress?.onProgress("[DPKG] reparação concluída")
+                Result.success(msg)
+            } catch (e: Exception) {
+                try {
+                    LinuxConfig.bootstrapMarker(context).delete()
+                } catch (_: Exception) {
+                }
+                Result.failure(e)
+            }
+        }
+
+    /**
+     * One-time bootstrap; skip if marker present unless force=true.
+     */
+    suspend fun ensureDebianBootstrap(
+        force: Boolean = false,
+        onProgress: ProgressListener? = null,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        val marker = LinuxConfig.bootstrapMarker(context)
+        if (!force && marker.isFile) {
+            return@withContext Result.success("[Linux] bootstrap já concluído (marcador presente)")
+        }
+        onProgress?.onProgress("[Linux] bootstrap Debian / reparação dpkg...")
+        repairDpkg(onProgress)
+    }
+
     private fun prootArgv(command: String): List<String> {
         val proot = prootFile() ?: error("libproot.so missing")
         if (!isRootFsReady()) {
@@ -392,6 +469,7 @@ class LinuxRuntime(
         env["LANG"] = "C.UTF-8"
         env["USER"] = "root"
         env["LOGNAME"] = "root"
+        env["DEBIAN_FRONTEND"] = "noninteractive"
 
         val loader = loaderFile() ?: File(linkLibDir(), "libproot_loader.so")
         if (loader.isFile) env["PROOT_LOADER"] = loader.absolutePath
