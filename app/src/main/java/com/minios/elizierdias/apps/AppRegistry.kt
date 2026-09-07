@@ -1,6 +1,7 @@
 package com.minios.elizierdias.apps
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Language
@@ -28,6 +29,15 @@ object AppRegistry {
             defaultSize = Size(520f, 360f),
         )
 
+    val linuxDesktop =
+        MiniApp(
+            "linux_desktop",
+            "Linux Desktop",
+            Icons.Filled.Computer,
+            // Quase ecrã inteiro — geometria VNC segue o dispositivo
+            defaultSize = Size(900f, 560f),
+        )
+
     val settings =
         MiniApp(
             "settings",
@@ -49,7 +59,6 @@ object AppRegistry {
             "browser",
             "Browser",
             Icons.Filled.Language,
-            // Mais largo tipo PC; o WindowManager limita a ~92% do ecrã
             defaultSize = Size(720f, 520f),
         )
 
@@ -73,6 +82,7 @@ object AppRegistry {
         listOf(
             files,
             terminal,
+            linuxDesktop,
             settings,
             softwareCenter,
             browser,
