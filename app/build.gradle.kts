@@ -8,11 +8,12 @@ android {
     compileSdk = 34
 
     defaultConfig {
+        // Um so package — updates sobrescrevem sem desinstalar (RootFS preservado)
         applicationId = "com.minios.elizierdias"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.3.8"
+        versionCode = 5
+        versionName = "0.3.9"
         vectorDrawables { useSupportLibrary = true }
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -29,8 +30,8 @@ android {
             )
         }
         debug {
-            applicationIdSuffix = ".debug"
-            // debug mantém símbolos; performance real mede-se em release
+            // SEM applicationIdSuffix — mesmo package que release
+            // para o APK do Actions atualizar em cima sem apagar dados/RootFS
         }
     }
 
