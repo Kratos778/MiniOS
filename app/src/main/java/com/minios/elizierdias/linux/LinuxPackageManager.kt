@@ -68,8 +68,10 @@ class LinuxPackageManager(
     /** Status dpkg: "install ok installed" */
     suspend fun isPackageInstalled(packageName: String): Boolean {
         val name = validatePackageName(packageName).getOrElse { return false }
+        // Format string for dpkg: ${Status}
+        val fmt = "\${'$'}{Status}"
         val r = runtime.exec(
-            "dpkg-query -W -f='\${'$'}{Status}' $name 2>/dev/null || true",
+            "dpkg-query -W -f='$fmt' $name 2>/dev/null || true",
             timeoutSec = 30,
         )
         val status = r.getOrNull()?.stdout?.trim().orEmpty()
@@ -78,8 +80,9 @@ class LinuxPackageManager(
 
     suspend fun packageVersion(packageName: String): String? {
         val name = validatePackageName(packageName).getOrElse { return null }
+        val fmt = "\${'$'}{Version}"
         val r = runtime.exec(
-            "dpkg-query -W -f='\${'$'}{Version}' $name 2>/dev/null || true",
+            "dpkg-query -W -f='$fmt' $name 2>/dev/null || true",
             timeoutSec = 30,
         )
         val v = r.getOrNull()?.stdout?.trim().orEmpty()
@@ -87,8 +90,9 @@ class LinuxPackageManager(
     }
 
     suspend fun listInstalled(): List<PackageInfo> {
+        val fmt = "\${'$'}{Package}\\t\${'$'}{Version}\\n"
         val r = runtime.exec(
-            "dpkg-query -W -f='\${'$'}{Package}\\t\${'$'}{Version}\\n' 2>/dev/null || true",
+            "dpkg-query -W -f='$fmt' 2>/dev/null || true",
             timeoutSec = 60,
         )
         val out = r.getOrNull()?.stdout.orEmpty()
@@ -109,10 +113,6 @@ class LinuxPackageManager(
     suspend fun search(query: String): List<PackageInfo> {
         val q = query.trim()
         if (q.isEmpty() || q.length > 100) return emptyList()
-        if (q.any { it in ";&|`$(){}<>\"'\\" || it.isWhitespace() && q.count { c -> c.isWhitespace() } > 3 }) {
-            return emptyList()
-        }
-        // apt-cache search is safe enough with limited query
         val safe = q.replace(Regex("[^a-zA-Z0-9+._* -]"), "")
         if (safe.isBlank()) return emptyList()
         val r = runtime.exec(
@@ -139,9 +139,7 @@ class LinuxPackageManager(
             .toList()
     }
 
-    /**
-     * apt-get update — always allowed to re-run (index refresh).
-     */
+    /** apt-get update — pode repetir sempre (índices). */
     suspend fun update(onProgress: ((String) -> Unit)? = null): OpResult {
         if (!tryLock()) {
             return OpResult(
@@ -173,9 +171,7 @@ class LinuxPackageManager(
         }
     }
 
-    /**
-     * Install package if not already installed. Dependencies left to apt.
-     */
+    /** Instala só se ainda não estiver instalado. Dependências: APT. */
     suspend fun install(
         packageName: String,
         onProgress: ((String) -> Unit)? = null,
@@ -221,7 +217,10 @@ class LinuxPackageManager(
             when {
                 really -> {
                     val ver = packageVersion(name) ?: ""
-                    val msg = log("INSTALL", "$name instalado com sucesso${if (ver.isNotEmpty()) " ($ver)" else ""}.")
+                    val msg = log(
+                        "INSTALL",
+                        "$name instalado com sucesso${if (ver.isNotEmpty()) " ($ver)" else ""}.",
+                    )
                     onProgress?.invoke(msg)
                     OpResult(true, "$msg\n$body")
                 }
