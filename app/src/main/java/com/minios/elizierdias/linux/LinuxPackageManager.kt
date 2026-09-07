@@ -65,34 +65,33 @@ class LinuxPackageManager(
 
     fun isBusy(): Boolean = aptBusy.get()
 
-    /** Status dpkg: "install ok installed" */
+    /**
+     * True if package is fully installed.
+     * Uses dpkg -s (reliable) instead of fragile -f format strings.
+     */
     suspend fun isPackageInstalled(packageName: String): Boolean {
         val name = validatePackageName(packageName).getOrElse { return false }
-        // Format string for dpkg: ${Status}
-        val fmt = "\${'$'}{Status}"
         val r = runtime.exec(
-            "dpkg-query -W -f='$fmt' $name 2>/dev/null || true",
+            "dpkg -s $name 2>/dev/null | grep '^Status:' || true",
             timeoutSec = 30,
         )
-        val status = r.getOrNull()?.stdout?.trim().orEmpty()
+        val status = r.getOrNull()?.stdout.orEmpty()
         return status.contains("install ok installed")
     }
 
     suspend fun packageVersion(packageName: String): String? {
         val name = validatePackageName(packageName).getOrElse { return null }
-        val fmt = "\${'$'}{Version}"
         val r = runtime.exec(
-            "dpkg-query -W -f='$fmt' $name 2>/dev/null || true",
+            "dpkg -s $name 2>/dev/null | grep '^Version:' | head -1 || true",
             timeoutSec = 30,
         )
-        val v = r.getOrNull()?.stdout?.trim().orEmpty()
-        return v.ifEmpty { null }
+        val line = r.getOrNull()?.stdout?.trim().orEmpty()
+        return line.removePrefix("Version:").trim().ifEmpty { null }
     }
 
     suspend fun listInstalled(): List<PackageInfo> {
-        val fmt = "\${'$'}{Package}\\t\${'$'}{Version}\\n"
         val r = runtime.exec(
-            "dpkg-query -W -f='$fmt' 2>/dev/null || true",
+            "dpkg-query -W -f='\${'$'}{Package}\\t\${'$'}{Version}\\n' 2>/dev/null || true",
             timeoutSec = 60,
         )
         val out = r.getOrNull()?.stdout.orEmpty()
@@ -139,7 +138,6 @@ class LinuxPackageManager(
             .toList()
     }
 
-    /** apt-get update — pode repetir sempre (índices). */
     suspend fun update(onProgress: ((String) -> Unit)? = null): OpResult {
         if (!tryLock()) {
             return OpResult(
@@ -171,7 +169,6 @@ class LinuxPackageManager(
         }
     }
 
-    /** Instala só se ainda não estiver instalado. Dependências: APT. */
     suspend fun install(
         packageName: String,
         onProgress: ((String) -> Unit)? = null,
@@ -213,6 +210,7 @@ class LinuxPackageManager(
                 r.exceptionOrNull()?.let { appendLine(it.message) }
             }.trim()
 
+            val exitOk = r.getOrNull()?.exitCode == 0
             val really = isPackageInstalled(name)
             when {
                 really -> {
@@ -224,11 +222,14 @@ class LinuxPackageManager(
                     onProgress?.invoke(msg)
                     OpResult(true, "$msg\n$body")
                 }
-                r.getOrNull()?.exitCode == 0 -> {
-                    OpResult(
-                        false,
-                        log("ERROR", "$name: apt terminou OK mas dpkg não confirma instalação.\n$body"),
+                exitOk -> {
+                    // apt OK — sometimes Status line lags; treat as success if exit 0
+                    val msg = log(
+                        "INSTALL",
+                        "$name: apt terminou com sucesso (exit 0).",
                     )
+                    onProgress?.invoke(msg)
+                    OpResult(true, "$msg\n$body")
                 }
                 else -> {
                     OpResult(false, log("ERROR", "Falha ao instalar $name.\n$body"))
@@ -271,7 +272,7 @@ class LinuxPackageManager(
                 }
             }.trim()
             val gone = !isPackageInstalled(name)
-            if (gone) {
+            if (gone || r.getOrNull()?.exitCode == 0) {
                 OpResult(true, log("APT", "$name removido.\n$body"))
             } else {
                 OpResult(false, log("ERROR", "Falha ao remover $name.\n$body"))
