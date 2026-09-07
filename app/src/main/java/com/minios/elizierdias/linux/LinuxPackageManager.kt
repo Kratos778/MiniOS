@@ -12,13 +12,15 @@
 
 package com.minios.elizierdias.linux
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 /**
- * Future package manager bridge for the Linux environment
- * (apt / dpkg for Debian, apk for Alpine, etc.).
- *
- * First target: Debian ARM64 with apt.
+ * APT/dpkg bridge for Debian inside PRoot.
+ * Idempotent installs, concurrent lock, safe package names.
  */
-class LinuxPackageManager {
+class LinuxPackageManager(
+    private val runtime: LinuxRuntime,
+) {
 
     data class PackageInfo(
         val name: String,
@@ -27,39 +29,256 @@ class LinuxPackageManager {
         val installed: Boolean = false,
     )
 
-    /**
-     * List installed packages (stub).
-     */
-    fun listInstalled(): List<PackageInfo> {
-        return emptyList()
+    data class OpResult(
+        val success: Boolean,
+        val message: String,
+        val skipped: Boolean = false,
+    )
+
+    companion object {
+        private val PACKAGE_NAME_RE = Regex("^[a-z0-9][a-z0-9+._-]{0,200}$")
+        private val aptBusy = AtomicBoolean(false)
+    }
+
+    private fun log(tag: String, msg: String) = "[$tag] $msg"
+
+    fun validatePackageName(name: String): Result<String> {
+        val n = name.trim().lowercase()
+        if (n.isEmpty()) {
+            return Result.failure(IllegalArgumentException(log("ERROR", "Nome de pacote vazio")))
+        }
+        if (!PACKAGE_NAME_RE.matches(n)) {
+            return Result.failure(
+                IllegalArgumentException(
+                    log("ERROR", "Nome de pacote inválido: '$name' (só a-z 0-9 + . _ -)"),
+                ),
+            )
+        }
+        return Result.success(n)
+    }
+
+    private fun tryLock(): Boolean = aptBusy.compareAndSet(false, true)
+
+    private fun unlock() {
+        aptBusy.set(false)
+    }
+
+    fun isBusy(): Boolean = aptBusy.get()
+
+    /** Status dpkg: "install ok installed" */
+    suspend fun isPackageInstalled(packageName: String): Boolean {
+        val name = validatePackageName(packageName).getOrElse { return false }
+        val r = runtime.exec(
+            "dpkg-query -W -f='\${'$'}{Status}' $name 2>/dev/null || true",
+            timeoutSec = 30,
+        )
+        val status = r.getOrNull()?.stdout?.trim().orEmpty()
+        return status.contains("install ok installed")
+    }
+
+    suspend fun packageVersion(packageName: String): String? {
+        val name = validatePackageName(packageName).getOrElse { return null }
+        val r = runtime.exec(
+            "dpkg-query -W -f='\${'$'}{Version}' $name 2>/dev/null || true",
+            timeoutSec = 30,
+        )
+        val v = r.getOrNull()?.stdout?.trim().orEmpty()
+        return v.ifEmpty { null }
+    }
+
+    suspend fun listInstalled(): List<PackageInfo> {
+        val r = runtime.exec(
+            "dpkg-query -W -f='\${'$'}{Package}\\t\${'$'}{Version}\\n' 2>/dev/null || true",
+            timeoutSec = 60,
+        )
+        val out = r.getOrNull()?.stdout.orEmpty()
+        return out.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && '\t' in it }
+            .map { line ->
+                val parts = line.split('\t', limit = 2)
+                PackageInfo(
+                    name = parts[0],
+                    version = parts.getOrElse(1) { "" },
+                    installed = true,
+                )
+            }
+            .toList()
+    }
+
+    suspend fun search(query: String): List<PackageInfo> {
+        val q = query.trim()
+        if (q.isEmpty() || q.length > 100) return emptyList()
+        if (q.any { it in ";&|`$(){}<>\"'\\" || it.isWhitespace() && q.count { c -> c.isWhitespace() } > 3 }) {
+            return emptyList()
+        }
+        // apt-cache search is safe enough with limited query
+        val safe = q.replace(Regex("[^a-zA-Z0-9+._* -]"), "")
+        if (safe.isBlank()) return emptyList()
+        val r = runtime.exec(
+            "apt-cache search --names-only ${safe.take(80)} 2>/dev/null | head -n 40",
+            timeoutSec = 60,
+        )
+        val out = r.getOrNull()?.stdout.orEmpty()
+        return out.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .map { line ->
+                val idx = line.indexOf(" - ")
+                if (idx > 0) {
+                    PackageInfo(
+                        name = line.substring(0, idx).trim(),
+                        version = "",
+                        description = line.substring(idx + 3).trim(),
+                        installed = false,
+                    )
+                } else {
+                    PackageInfo(name = line, version = "", installed = false)
+                }
+            }
+            .toList()
     }
 
     /**
-     * Search packages (stub).
+     * apt-get update — always allowed to re-run (index refresh).
      */
-    fun search(query: String): List<PackageInfo> {
-        return emptyList()
+    suspend fun update(onProgress: ((String) -> Unit)? = null): OpResult {
+        if (!tryLock()) {
+            return OpResult(
+                false,
+                log("WARNING", "Já existe uma operação APT em andamento. Aguarde."),
+            )
+        }
+        return try {
+            onProgress?.invoke(log("APT", "A atualizar índices..."))
+            val r = runtime.exec(
+                "DEBIAN_FRONTEND=noninteractive apt-get update -y",
+                timeoutSec = 300,
+            )
+            val body = buildString {
+                r.getOrNull()?.let {
+                    if (it.stdout.isNotBlank()) appendLine(it.stdout)
+                    if (it.stderr.isNotBlank()) appendLine(it.stderr)
+                }
+                r.exceptionOrNull()?.let { appendLine(it.message) }
+            }.trim()
+            val ok = r.getOrNull()?.exitCode == 0
+            if (ok) {
+                OpResult(true, log("APT", "Índices atualizados.\n$body"))
+            } else {
+                OpResult(false, log("ERROR", "apt-get update falhou.\n$body"))
+            }
+        } finally {
+            unlock()
+        }
     }
 
     /**
-     * Install a package (stub).
-     * Will later run "apt-get install -y <name>" inside the RootFS.
+     * Install package if not already installed. Dependencies left to apt.
      */
-    suspend fun install(packageName: String): Result<Unit> {
-        return Result.failure(UnsupportedOperationException("Linux runtime not connected yet"))
+    suspend fun install(
+        packageName: String,
+        onProgress: ((String) -> Unit)? = null,
+    ): OpResult {
+        val name = validatePackageName(packageName).getOrElse {
+            return OpResult(false, it.message ?: "nome inválido")
+        }
+
+        if (!tryLock()) {
+            return OpResult(
+                false,
+                log("WARNING", "Já existe uma instalação em andamento. Aguarde a operação atual terminar."),
+            )
+        }
+
+        return try {
+            onProgress?.invoke(log("INSTALL", "Verificando $name..."))
+            if (isPackageInstalled(name)) {
+                val ver = packageVersion(name) ?: "?"
+                val msg = log(
+                    "WARNING",
+                    "O pacote '$name' já está instalado ($ver).\n" +
+                        "Nenhuma instalação foi realizada para evitar ocupar espaço desnecessariamente.",
+                )
+                onProgress?.invoke(msg)
+                return OpResult(true, msg, skipped = true)
+            }
+
+            onProgress?.invoke(log("INSTALL", "Instalando $name..."))
+            val r = runtime.exec(
+                "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $name",
+                timeoutSec = 600,
+            )
+            val body = buildString {
+                r.getOrNull()?.let {
+                    if (it.stdout.isNotBlank()) appendLine(it.stdout)
+                    if (it.stderr.isNotBlank()) appendLine(it.stderr)
+                }
+                r.exceptionOrNull()?.let { appendLine(it.message) }
+            }.trim()
+
+            val really = isPackageInstalled(name)
+            when {
+                really -> {
+                    val ver = packageVersion(name) ?: ""
+                    val msg = log("INSTALL", "$name instalado com sucesso${if (ver.isNotEmpty()) " ($ver)" else ""}.")
+                    onProgress?.invoke(msg)
+                    OpResult(true, "$msg\n$body")
+                }
+                r.getOrNull()?.exitCode == 0 -> {
+                    OpResult(
+                        false,
+                        log("ERROR", "$name: apt terminou OK mas dpkg não confirma instalação.\n$body"),
+                    )
+                }
+                else -> {
+                    OpResult(false, log("ERROR", "Falha ao instalar $name.\n$body"))
+                }
+            }
+        } finally {
+            unlock()
+        }
     }
 
-    /**
-     * Remove a package (stub).
-     */
-    suspend fun remove(packageName: String): Result<Unit> {
-        return Result.failure(UnsupportedOperationException("Linux runtime not connected yet"))
-    }
+    suspend fun remove(
+        packageName: String,
+        onProgress: ((String) -> Unit)? = null,
+    ): OpResult {
+        val name = validatePackageName(packageName).getOrElse {
+            return OpResult(false, it.message ?: "nome inválido")
+        }
 
-    /**
-     * Update package lists (stub).
-     */
-    suspend fun update(): Result<Unit> {
-        return Result.failure(UnsupportedOperationException("Linux runtime not connected yet"))
+        if (!tryLock()) {
+            return OpResult(
+                false,
+                log("WARNING", "Já existe uma operação APT em andamento. Aguarde."),
+            )
+        }
+
+        return try {
+            if (!isPackageInstalled(name)) {
+                val msg = log("WARNING", "'$name' não está instalado. Nada a remover.")
+                return OpResult(true, msg, skipped = true)
+            }
+            onProgress?.invoke(log("APT", "A remover $name..."))
+            val r = runtime.exec(
+                "DEBIAN_FRONTEND=noninteractive apt-get remove -y $name",
+                timeoutSec = 300,
+            )
+            val body = buildString {
+                r.getOrNull()?.let {
+                    if (it.stdout.isNotBlank()) appendLine(it.stdout)
+                    if (it.stderr.isNotBlank()) appendLine(it.stderr)
+                }
+            }.trim()
+            val gone = !isPackageInstalled(name)
+            if (gone) {
+                OpResult(true, log("APT", "$name removido.\n$body"))
+            } else {
+                OpResult(false, log("ERROR", "Falha ao remover $name.\n$body"))
+            }
+        } finally {
+            unlock()
+        }
     }
 }

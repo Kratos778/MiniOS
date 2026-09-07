@@ -24,6 +24,8 @@ object LinuxConfig {
     const val TMP_DIR_NAME = "tmp"
     const val INSTALLED_MARKER = ".minios_rootfs_installed"
     const val STORAGE_MARKER = ".minios_storage_ready"
+    const val BOOTSTRAP_MARKER = ".minios_debian_bootstrap_ok"
+    const val DNS_MARKER = ".minios_dns_ok"
 
     const val DEFAULT_DISTRO = "debian-bookworm-arm64"
     const val DEFAULT_SHELL = "/bin/bash"
@@ -70,6 +72,12 @@ object LinuxConfig {
 
     fun storageMarker(context: Context): File =
         File(runtimeDir(context), STORAGE_MARKER)
+
+    fun bootstrapMarker(context: Context): File =
+        File(runtimeDir(context), BOOTSTRAP_MARKER)
+
+    fun dnsMarker(context: Context): File =
+        File(runtimeDir(context), DNS_MARKER)
 
     fun rootfsTarball(context: Context): File =
         File(downloadDir(context), ROOTFS_FILENAME)
