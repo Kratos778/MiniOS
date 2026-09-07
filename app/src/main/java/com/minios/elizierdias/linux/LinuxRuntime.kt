@@ -17,6 +17,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStreamReader
+import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 
 class LinuxRuntime(
@@ -67,7 +68,6 @@ class LinuxRuntime(
             resolveShellPath(root) != null
     }
 
-    /** Prefer real/symlink paths that exist on disk. */
     fun resolveShellPath(root: File = LinuxConfig.rootfsDir(context)): String? {
         val candidates = listOf(
             "bin/bash",
@@ -119,6 +119,16 @@ class LinuxRuntime(
         appendLine("shell: ${resolveShellPath(root) ?: "MISSING"}")
         appendLine("/etc: ${File(root, "etc").exists()}")
         appendLine("/usr: ${File(root, "usr").exists()}")
+        val resolv = File(root, "etc/resolv.conf")
+        appendLine(
+            "resolv.conf: exists=${resolv.exists()} symlink=${
+                try {
+                    Files.isSymbolicLink(resolv.toPath())
+                } catch (_: Exception) {
+                    false
+                }
+            }",
+        )
         appendLine("rootfsReady: ${isRootFsReady()}")
     }
 
@@ -166,14 +176,47 @@ class LinuxRuntime(
         return dir
     }
 
+    /**
+     * proot-distro ships resolv.conf as a symlink to systemd-resolved stub,
+     * which does not exist under PRoot → apt cannot resolve hostnames.
+     * Always replace with a real file pointing at public DNS.
+     */
     fun ensureDns() {
         try {
             val etc = File(LinuxConfig.rootfsDir(context), "etc")
             if (!etc.isDirectory) return
+
             val resolv = File(etc, "resolv.conf")
-            if (!resolv.exists() || resolv.length() < 8) {
-                resolv.writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
+            val isSymlink = try {
+                Files.isSymbolicLink(resolv.toPath())
+            } catch (_: Exception) {
+                false
             }
+            val content = try {
+                if (resolv.isFile && !isSymlink) resolv.readText() else ""
+            } catch (_: Exception) {
+                ""
+            }
+            val needsFix = isSymlink ||
+                !resolv.exists() ||
+                !content.contains("nameserver")
+
+            if (needsFix) {
+                try {
+                    if (resolv.exists() || isSymlink) resolv.delete()
+                } catch (_: Exception) {
+                    try {
+                        Files.deleteIfExists(resolv.toPath())
+                    } catch (_: Exception) {
+                    }
+                }
+                resolv.writeText(
+                    "nameserver 8.8.8.8\n" +
+                        "nameserver 1.1.1.1\n" +
+                        "nameserver 8.8.4.4\n",
+                )
+            }
+
             val hosts = File(etc, "hosts")
             if (!hosts.exists()) {
                 hosts.writeText("127.0.0.1\tlocalhost\n::1\tlocalhost\n")
