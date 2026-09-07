@@ -106,11 +106,12 @@ fun TerminalApp() {
             lines.add("1) install   (ou reinstall-rootfs se estiver partido)")
             lines.add("2) setup-runtime")
             lines.add("3) setup-storage")
+            lines.add("4) setup-dns")
         } else if (!rt.isProotInstalled()) {
             lines.add("libproot.so em falta — reinstala o APK")
         } else {
-            lines.add("Linux pronto. Exemplos: uname -a | ls / | cd /sdcard")
-            lines.add("Segura o texto para copiar (instalação, erros, etc.)")
+            lines.add("Linux pronto. setup-dns | apt update | uname -a")
+            lines.add("Segura o texto para copiar")
             session = linuxManager.startSession()
             promptCwd = session?.cwd ?: "/root"
         }
@@ -137,6 +138,8 @@ fun TerminalApp() {
                 "repair-proot"
             "reinstall-rootfs", "reinstall", "reinstall_rootfs", "wipe-install" ->
                 "reinstall-rootfs"
+            "setup-dns", "setupdns", "fix-dns", "dns" ->
+                "setup-dns"
             else -> cmd.trim()
         }
     }
@@ -147,9 +150,8 @@ fun TerminalApp() {
             "help" -> {
                 lines.add("Setup:")
                 lines.add("  install | reinstall-rootfs | setup-runtime | setup-storage")
-                lines.add("  repair-proot | status | clear")
-                lines.add("Linux: uname -a | ls / | cd /sdcard | pwd")
-                lines.add("Dica: segura o texto do terminal para copiar")
+                lines.add("  setup-dns | repair-proot | status | clear")
+                lines.add("Linux: uname -a | ls / | cd /sdcard | apt update")
                 lines.add("")
                 return true
             }
@@ -206,7 +208,7 @@ fun TerminalApp() {
                 busy = true
                 session = null
                 scope.launch {
-                    lines.add("A apagar RootFS antigo e reinstalar (com symlinks)...")
+                    lines.add("A apagar RootFS antigo e reinstalar...")
                     scrollToBottom()
                     val r = linuxManager.reinstallRootFs()
                     busy = false
@@ -229,10 +231,30 @@ fun TerminalApp() {
                     val r = linuxManager.setupRuntime()
                     busy = false
                     if (r.isSuccess) {
-                        lines.add("✓ PRoot OK")
+                        lines.add("✓ PRoot OK + DNS")
                         session = linuxManager.startSession()
                         promptCwd = session?.cwd ?: "/root"
                         lines.add("Sessão Linux ativa.")
+                    } else {
+                        lines.add("✗ ${r.exceptionOrNull()?.message}")
+                    }
+                    lines.add("")
+                    scrollToBottom()
+                }
+                return true
+            }
+            "setup-dns" -> {
+                if (busy) {
+                    lines.add("ocupado...")
+                    return true
+                }
+                busy = true
+                scope.launch {
+                    val r = linuxManager.setupDns()
+                    busy = false
+                    if (r.isSuccess) {
+                        r.getOrNull()?.lines()?.forEach { lines.add(it) }
+                        lines.add("✓ setup-dns — tenta: apt update")
                     } else {
                         lines.add("✗ ${r.exceptionOrNull()?.message}")
                     }
@@ -343,7 +365,6 @@ fun TerminalApp() {
             )
         }
 
-        // Texto selecionável — segura para copiar (download, erros, etc.)
         SelectionContainer(
             modifier = Modifier.weight(1f),
         ) {

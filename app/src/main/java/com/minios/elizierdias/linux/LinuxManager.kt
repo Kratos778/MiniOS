@@ -42,6 +42,11 @@ class LinuxManager(
         val rootOk = status.isInstalled
         val prootOk = runtime.isProotInstalled()
 
+        if (rootOk) {
+            // Sempre corrigir DNS ao abrir o terminal
+            runtime.ensureDns()
+        }
+
         when {
             rootOk && prootOk -> {
                 _statusMessage.value = "Linux ready (RootFS + PRoot)"
@@ -69,20 +74,13 @@ class LinuxManager(
         }
         _rootFsStatus.value = rootFs.status()
         if (result.isSuccess) {
+            runtime.ensureDns()
             _statusMessage.value = "RootFS installed — next: setup-runtime"
         }
         return result
     }
 
-    /**
-     * Wipe broken RootFS (e.g. missing symlinks) and install from scratch.
-     */
     suspend fun reinstallRootFs(): Result<Unit> {
-        _isReady.value = false
-        LinuxConfig.setEnabled(false)
-        currentSession?.close()
-        currentSession = null
-
         _installProgress.value = "Wiping old RootFS..."
         _statusMessage.value = "Wiping old RootFS..."
         rootFs.clearInstalledMarker()
@@ -97,6 +95,7 @@ class LinuxManager(
         }
         _rootFsStatus.value = rootFs.status()
         if (result.isSuccess) {
+            runtime.ensureDns()
             _statusMessage.value = "RootFS reinstalled — next: setup-runtime"
         }
         return result
@@ -109,6 +108,7 @@ class LinuxManager(
             _statusMessage.value = msg
         }
         if (result.isSuccess && rootFs.isInstalled()) {
+            runtime.ensureDns()
             _isReady.value = true
             LinuxConfig.setEnabled(true)
             _statusMessage.value = "Linux ready (RootFS + PRoot)"
@@ -123,6 +123,7 @@ class LinuxManager(
             _statusMessage.value = msg
         }
         if (result.isSuccess && rootFs.isInstalled()) {
+            runtime.ensureDns()
             _isReady.value = true
             LinuxConfig.setEnabled(true)
         }
@@ -132,6 +133,15 @@ class LinuxManager(
     suspend fun setupStorage(): Result<Unit> {
         _installProgress.value = "setup-storage..."
         val result = runtime.setupStorage { msg ->
+            _installProgress.value = msg
+            _statusMessage.value = msg
+        }
+        return result
+    }
+
+    suspend fun setupDns(): Result<String> {
+        _installProgress.value = "setup-dns..."
+        val result = runtime.setupDns { msg ->
             _installProgress.value = msg
             _statusMessage.value = msg
         }

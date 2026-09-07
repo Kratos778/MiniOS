@@ -117,18 +117,19 @@ class LinuxRuntime(
         appendLine("rootfs installed marker: ${LinuxConfig.installedMarker(context).isFile}")
         appendLine("/root: ${File(root, "root").isDirectory}")
         appendLine("shell: ${resolveShellPath(root) ?: "MISSING"}")
-        appendLine("/etc: ${File(root, "etc").exists()}")
-        appendLine("/usr: ${File(root, "usr").exists()}")
         val resolv = File(root, "etc/resolv.conf")
-        appendLine(
-            "resolv.conf: exists=${resolv.exists()} symlink=${
-                try {
-                    Files.isSymbolicLink(resolv.toPath())
-                } catch (_: Exception) {
-                    false
-                }
-            }",
-        )
+        val symlink = try {
+            Files.isSymbolicLink(resolv.toPath())
+        } catch (_: Exception) {
+            false
+        }
+        val resolvBody = try {
+            if (resolv.exists() && !symlink) resolv.readText().trim().take(120) else "(symlink/missing)"
+        } catch (_: Exception) {
+            "(unreadable)"
+        }
+        appendLine("resolv.conf: symlink=$symlink")
+        appendLine("resolv body: $resolvBody")
         appendLine("rootfsReady: ${isRootFsReady()}")
     }
 
@@ -176,54 +177,104 @@ class LinuxRuntime(
         return dir
     }
 
-    /**
-     * proot-distro ships resolv.conf as a symlink to systemd-resolved stub,
-     * which does not exist under PRoot → apt cannot resolve hostnames.
-     * Always replace with a real file pointing at public DNS.
-     */
-    fun ensureDns() {
+    private fun deletePath(file: File) {
         try {
-            val etc = File(LinuxConfig.rootfsDir(context), "etc")
-            if (!etc.isDirectory) return
+            if (Files.isSymbolicLink(file.toPath()) || file.exists()) {
+                file.delete()
+            }
+        } catch (_: Exception) {
+            try {
+                Files.deleteIfExists(file.toPath())
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * Always write a real /etc/resolv.conf for PRoot.
+     * proot-distro uses a systemd-resolved symlink that does not exist here.
+     */
+    fun ensureDns(): String {
+        return try {
+            val root = LinuxConfig.rootfsDir(context)
+            val etc = File(root, "etc")
+            if (!etc.isDirectory) return "DNS: /etc em falta"
 
             val resolv = File(etc, "resolv.conf")
-            val isSymlink = try {
-                Files.isSymbolicLink(resolv.toPath())
-            } catch (_: Exception) {
-                false
-            }
-            val content = try {
-                if (resolv.isFile && !isSymlink) resolv.readText() else ""
-            } catch (_: Exception) {
-                ""
-            }
-            val needsFix = isSymlink ||
-                !resolv.exists() ||
-                !content.contains("nameserver")
-
-            if (needsFix) {
-                try {
-                    if (resolv.exists() || isSymlink) resolv.delete()
-                } catch (_: Exception) {
-                    try {
-                        Files.deleteIfExists(resolv.toPath())
-                    } catch (_: Exception) {
-                    }
-                }
-                resolv.writeText(
+            deletePath(resolv)
+            val dnsText =
+                "# MiniOS PRoot DNS\n" +
                     "nameserver 8.8.8.8\n" +
-                        "nameserver 1.1.1.1\n" +
-                        "nameserver 8.8.4.4\n",
+                    "nameserver 1.1.1.1\n" +
+                    "nameserver 8.8.4.4\n" +
+                    "options timeout:2 attempts:3\n"
+            resolv.writeText(dnsText)
+
+            val hosts = File(etc, "hosts")
+            if (!hosts.exists() || hosts.length() < 4) {
+                hosts.writeText(
+                    "127.0.0.1\tlocalhost\n" +
+                        "::1\tlocalhost ip6-localhost ip6-loopback\n",
                 )
             }
 
-            val hosts = File(etc, "hosts")
-            if (!hosts.exists()) {
-                hosts.writeText("127.0.0.1\tlocalhost\n::1\tlocalhost\n")
+            // Garantir resolucao via ficheiros + DNS (nao so mdns/resolve)
+            val nss = File(etc, "nsswitch.conf")
+            if (nss.isFile) {
+                val nssText = nss.readText()
+                if (!nssText.contains("hosts:")) {
+                    nss.appendText("\nhosts:          files dns\n")
+                } else if (!nssText.contains("hosts:") ||
+                    !nssText.lineSequence().any {
+                        it.trimStart().startsWith("hosts:") && it.contains("dns")
+                    }
+                ) {
+                    val fixed = nssText.lineSequence().joinToString("\n") { line ->
+                        if (line.trimStart().startsWith("hosts:")) {
+                            "hosts:\t\tfiles dns"
+                        } else {
+                            line
+                        }
+                    } + "\n"
+                    nss.writeText(fixed)
+                }
             }
-        } catch (_: Exception) {
+
+            "DNS OK\n${resolv.readText().trim()}"
+        } catch (e: Exception) {
+            "DNS ERROR: ${e.message}"
         }
     }
+
+    suspend fun setupDns(onProgress: ProgressListener? = null): Result<String> =
+        withContext(Dispatchers.IO) {
+            try {
+                if (!isRootFsReady()) {
+                    return@withContext Result.failure(
+                        IllegalStateException("RootFS not ready"),
+                    )
+                }
+                val msg = ensureDns()
+                onProgress?.onProgress(msg)
+                // Teste de resolucao dentro do PRoot
+                val test = exec(
+                    "getent hosts deb.debian.org || getent hosts one.one.one.one || true",
+                    timeoutSec = 15,
+                )
+                val out = buildString {
+                    appendLine(msg)
+                    test.getOrNull()?.let { r ->
+                        if (r.stdout.isNotBlank()) appendLine("resolve: ${r.stdout}")
+                        if (r.stderr.isNotBlank()) appendLine("stderr: ${r.stderr}")
+                    }
+                    test.exceptionOrNull()?.let { appendLine("test: ${it.message}") }
+                }
+                onProgress?.onProgress(out.trim())
+                Result.success(out.trim())
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
 
     suspend fun ensureProot(onProgress: ProgressListener? = null): Result<Unit> =
         withContext(Dispatchers.IO) {
