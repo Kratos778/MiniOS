@@ -7,19 +7,23 @@
 
 package com.minios.elizierdias.apps.terminal
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -50,7 +54,7 @@ import kotlinx.coroutines.launch
 fun TerminalApp() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
+    val scrollState = rememberScrollState()
 
     val linuxManager = remember(context) { LinuxManager(context) }
     val statusMessage by linuxManager.statusMessage.collectAsState()
@@ -71,6 +75,11 @@ fun TerminalApp() {
         )
     }
 
+    // Um unico bloco de texto — SelectionContainer consegue selecionar tudo, nao so o visivel
+    val fullText = remember(lines.size, lines.lastOrNull()) {
+        lines.joinToString("\n")
+    }
+
     fun prompt(): String {
         val short = when {
             promptCwd == "/root" || promptCwd == "~" -> "~"
@@ -82,8 +91,14 @@ fun TerminalApp() {
 
     fun scrollToBottom() {
         scope.launch {
-            listState.animateScrollToItem((lines.size - 1).coerceAtLeast(0))
+            scrollState.animateScrollTo(scrollState.maxValue)
         }
+    }
+
+    fun copyAll() {
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("MiniOS Terminal", fullText))
+        Toast.makeText(context, "Terminal copiado (${lines.size} linhas)", Toast.LENGTH_SHORT).show()
     }
 
     LaunchedEffect(Unit) {
@@ -111,7 +126,7 @@ fun TerminalApp() {
             lines.add("libproot.so em falta — reinstala o APK")
         } else {
             lines.add("Linux pronto. setup-dns | apt update | uname -a")
-            lines.add("Segura o texto para copiar")
+            lines.add("Segura o texto para copiar, ou toca em Copiar")
             session = linuxManager.startSession()
             promptCwd = session?.cwd ?: "/root"
         }
@@ -125,6 +140,10 @@ fun TerminalApp() {
             lines.add(msg)
             scrollToBottom()
         }
+    }
+
+    LaunchedEffect(lines.size) {
+        scrollToBottom()
     }
 
     fun normalizeBuiltin(cmd: String): String {
@@ -349,6 +368,15 @@ fun TerminalApp() {
             )
             Spacer(modifier = Modifier.weight(1f))
             Text(
+                text = "Copiar",
+                color = Color(0xFF58A6FF),
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .clickable { copyAll() }
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+            Text(
                 text = when {
                     busy -> "busy"
                     isReady -> "ready"
@@ -365,22 +393,21 @@ fun TerminalApp() {
             )
         }
 
+        // Column + scroll + um Text unico = selecao cobre o historico inteiro
         SelectionContainer(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
         ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                itemsIndexed(lines) { index, line ->
-                    Text(
-                        text = line,
-                        color = Color(0xFF3FB950),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp,
-                    )
-                }
-            }
+            Text(
+                text = fullText,
+                color = Color(0xFF3FB950),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState),
+            )
         }
 
         TextField(
