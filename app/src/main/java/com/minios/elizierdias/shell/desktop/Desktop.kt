@@ -130,7 +130,6 @@ fun Desktop() {
                 }
 
                 windowManager.windows
-                    .filter { !it.isMinimized }
                     .sortedBy { it.zIndex }
                     .forEach { window ->
                         key(window.instanceId) {

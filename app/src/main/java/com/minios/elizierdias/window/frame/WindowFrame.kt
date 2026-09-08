@@ -54,8 +54,7 @@ fun WindowFrame(
     onToggleMaximize: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    // Minimizada: manter content na composição (estado do Terminal/apps)
-    // mas não desenhar a moldura visível.
+    // Minimizada: manter content na composição (Terminal/histórico não some)
     if (window.isMinimized) {
         Box(modifier = Modifier.size(0.dp)) {
             content()
@@ -85,48 +84,73 @@ fun WindowFrame(
             )
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF161B22))
+            // Toque na janela → foca (antes do conteúdo)
             .pointerInput(window.instanceId) {
-                detectDragGestures(
-                    onDragStart = { onFocus() },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        dragPos = Offset(
-                            dragPos.x + dragAmount.x,
-                            dragPos.y + dragAmount.y,
-                        )
-                        onMove(dragPos)
-                    },
-                )
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.any { it.pressed }) {
+                            onFocus()
+                        }
+                    }
+                }
             },
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // Barra de título — arrastar para mover
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(36.dp)
-                    .background(Color(0xFF21262D))
-                    .padding(horizontal = 8.dp),
+                    .background(
+                        if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128),
+                    )
+                    .pointerInput(window.instanceId, window.isMaximized) {
+                        if (window.isMaximized) return@pointerInput
+                        detectDragGestures(
+                            onDragStart = {
+                                onFocus()
+                                dragPos = window.position
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                dragPos += dragAmount
+                                onMove(dragPos)
+                            },
+                        )
+                    }
+                    .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Icon(
+                    imageVector = window.app.icon,
+                    contentDescription = null,
+                    tint = Color(0xFFC9D1D9),
+                    modifier = Modifier
+                        .padding(start = 4.dp)
+                        .size(16.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = window.app.title,
-                    color = Color(0xFFE6EDF3),
+                    color = Color(0xFFC9D1D9),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f),
+                    maxLines = 1,
                 )
                 IconButton(onClick = onMinimize, modifier = Modifier.size(28.dp)) {
                     Icon(
                         Icons.Filled.Minimize,
-                        contentDescription = "Minimize",
+                        "Minimize",
                         tint = Color(0xFF8B949E),
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(14.dp),
                     )
                 }
                 IconButton(onClick = onToggleMaximize, modifier = Modifier.size(28.dp)) {
                     Icon(
                         Icons.Filled.CropSquare,
-                        contentDescription = "Maximize",
+                        "Maximize",
                         tint = Color(0xFF8B949E),
                         modifier = Modifier.size(14.dp),
                     )
@@ -134,19 +158,42 @@ fun WindowFrame(
                 IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
                     Icon(
                         Icons.Filled.Close,
-                        contentDescription = "Close",
+                        "Close",
                         tint = Color(0xFFF85149),
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(14.dp),
                     )
                 }
             }
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            ) {
+
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 content()
             }
+        }
+
+        // Handle de resize canto inferior direito
+        if (!window.isMaximized) {
+            var resizeSize by remember(window.instanceId) { mutableStateOf(window.size) }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(24.dp)
+                    .pointerInput(window.instanceId) {
+                        detectDragGestures(
+                            onDragStart = {
+                                onFocus()
+                                resizeSize = window.size
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                resizeSize = Size(
+                                    width = (resizeSize.width + dragAmount.x).coerceAtLeast(280f),
+                                    height = (resizeSize.height + dragAmount.y).coerceAtLeast(200f),
+                                )
+                                onResize(resizeSize)
+                            },
+                        )
+                    },
+            )
         }
     }
 }
