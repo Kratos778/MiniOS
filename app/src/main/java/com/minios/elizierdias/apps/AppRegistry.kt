@@ -29,12 +29,35 @@ object AppRegistry {
             defaultSize = Size(520f, 360f),
         )
 
+    val browser =
+        MiniApp(
+            "browser",
+            "Browser",
+            Icons.Filled.Language,
+            defaultSize = Size(720f, 520f),
+        )
+
+    val softwareCenter =
+        MiniApp(
+            "software_center",
+            "Software Center",
+            Icons.Filled.Widgets,
+            defaultSize = Size(540f, 400f),
+        )
+
+    val mediaPlayer =
+        MiniApp(
+            "media_player",
+            "MediaPlayerOS",
+            Icons.Filled.Headphones,
+            defaultSize = Size(560f, 420f),
+        )
+
     val linuxDesktop =
         MiniApp(
             "linux_desktop",
             "Linux Desktop",
             Icons.Filled.Computer,
-            // Quase ecrã inteiro — geometria VNC segue o dispositivo
             defaultSize = Size(900f, 560f),
         )
 
@@ -46,30 +69,6 @@ object AppRegistry {
             defaultSize = Size(560f, 420f),
         )
 
-    val softwareCenter =
-        MiniApp(
-            "software_center",
-            "Software Center",
-            Icons.Filled.Widgets,
-            defaultSize = Size(540f, 400f),
-        )
-
-    val browser =
-        MiniApp(
-            "browser",
-            "Browser",
-            Icons.Filled.Language,
-            defaultSize = Size(720f, 520f),
-        )
-
-    val mediaPlayer =
-        MiniApp(
-            "media_player",
-            "MediaPlayerOS",
-            Icons.Filled.Headphones,
-            defaultSize = Size(560f, 420f),
-        )
-
     val smartPlay =
         MiniApp(
             "smartplay",
@@ -78,17 +77,20 @@ object AppRegistry {
             defaultSize = Size(520f, 400f),
         )
 
-    val all =
+    /** Ordem no ecrã (scroll se não caber). Software Center incluído. */
+    val desktopIcons: List<MiniApp> =
         listOf(
             files,
             terminal,
+            browser,
+            softwareCenter,
+            mediaPlayer,
             linuxDesktop,
             settings,
-            softwareCenter,
-            browser,
-            mediaPlayer,
             smartPlay,
         )
+
+    val all: List<MiniApp> = desktopIcons
 
     fun byId(id: String): MiniApp? =
         all.firstOrNull { it.id == id }
