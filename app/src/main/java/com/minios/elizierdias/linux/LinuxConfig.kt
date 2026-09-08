@@ -13,13 +13,22 @@
 package com.minios.elizierdias.linux
 
 import android.content.Context
+import android.os.Environment
 import java.io.File
 
+/**
+ * Caminhos do runtime Linux.
+ *
+ * Preferência: /sdcard/MiniOS/… (visível no Files do telefone, **sobrevive à desinstalação**).
+ * Fallback: storage privado da app (apagado ao desinstalar).
+ */
 object LinuxConfig {
 
+    const val PUBLIC_DIR_NAME = "MiniOS"
     const val RUNTIME_DIR_NAME = "linux_runtime"
     const val ROOTFS_DIR_NAME = "rootfs"
     const val DOWNLOAD_DIR_NAME = "downloads"
+    const val IMPORTS_DIR_NAME = "imports"
     const val BIN_DIR_NAME = "bin"
     const val TMP_DIR_NAME = "tmp"
     const val INSTALLED_MARKER = ".minios_rootfs_installed"
@@ -49,8 +58,43 @@ object LinuxConfig {
         enabled = value
     }
 
-    fun runtimeDir(context: Context): File =
-        File(context.filesDir, RUNTIME_DIR_NAME)
+    /** /sdcard/MiniOS — pasta pública do projeto */
+    fun publicMiniOsDir(): File =
+        File(Environment.getExternalStorageDirectory(), PUBLIC_DIR_NAME)
+
+    /**
+     * Runtime persistente: /sdcard/MiniOS/linux_runtime
+     * Se não for possível escrever no armazenamento partilhado, usa filesDir (privado).
+     */
+    fun runtimeDir(context: Context): File {
+        val external = File(publicMiniOsDir(), RUNTIME_DIR_NAME)
+        if (canUseExternal(external)) {
+            return external
+        }
+        // Fallback privado (é apagado ao desinstalar)
+        return File(context.filesDir, RUNTIME_DIR_NAME)
+    }
+
+    fun isUsingPublicStorage(context: Context): Boolean {
+        val path = runtimeDir(context).absolutePath
+        val pub = publicMiniOsDir().absolutePath
+        return path.startsWith(pub)
+    }
+
+    private fun canUseExternal(externalRuntime: File): Boolean {
+        return try {
+            val base = publicMiniOsDir()
+            if (!base.exists() && !base.mkdirs()) return false
+            if (!externalRuntime.exists() && !externalRuntime.mkdirs()) return false
+            // Teste de escrita
+            val probe = File(externalRuntime, ".minios_write_test")
+            probe.writeText("ok")
+            probe.delete()
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     fun rootfsDir(context: Context): File =
         File(runtimeDir(context), ROOTFS_DIR_NAME)
@@ -58,11 +102,24 @@ object LinuxConfig {
     fun downloadDir(context: Context): File =
         File(runtimeDir(context), DOWNLOAD_DIR_NAME)
 
+    /** Ficheiros que o utilizador copia/unzip — /sdcard/MiniOS/imports */
+    fun importsDir(context: Context): File {
+        val external = File(publicMiniOsDir(), IMPORTS_DIR_NAME)
+        return try {
+            if (!external.exists()) external.mkdirs()
+            if (external.exists()) external
+            else File(runtimeDir(context), IMPORTS_DIR_NAME).also { it.mkdirs() }
+        } catch (_: Exception) {
+            File(runtimeDir(context), IMPORTS_DIR_NAME).also { it.mkdirs() }
+        }
+    }
+
     fun binDir(context: Context): File =
         File(runtimeDir(context), BIN_DIR_NAME)
 
+    /** tmp pode ficar privado (mais rápido, não precisa sobreviver) */
     fun tmpDir(context: Context): File =
-        File(runtimeDir(context), TMP_DIR_NAME)
+        File(context.filesDir, "$RUNTIME_DIR_NAME/$TMP_DIR_NAME")
 
     fun prootFile(context: Context): File =
         File(binDir(context), PROOT_FILENAME)
@@ -81,4 +138,8 @@ object LinuxConfig {
 
     fun rootfsTarball(context: Context): File =
         File(downloadDir(context), ROOTFS_FILENAME)
+
+    /** Legado: RootFS antigo dentro de filesDir (pré-migração) */
+    fun legacyPrivateRootfs(context: Context): File =
+        File(context.filesDir, "$RUNTIME_DIR_NAME/$ROOTFS_DIR_NAME")
 }
