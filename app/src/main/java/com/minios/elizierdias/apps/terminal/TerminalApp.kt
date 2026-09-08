@@ -105,20 +105,24 @@ fun TerminalApp() {
         linuxManager.initialize()
         val status = linuxManager.getRootFs().status()
         val rt = linuxManager.getRuntime()
-        val publicMode = LinuxConfig.isUsingPublicStorage(context)
+        val publicDl = LinuxConfig.isUsingPublicDownloads(context)
         lines.add("── estado ──")
         lines.add(statusMessage)
         lines.add("rootfs : ${status.rootfsPath}")
+        lines.add("RootFS: storage privado (precisa de symlinks)")
         lines.add(
-            if (publicMode) "storage: PUBLIC /sdcard/MiniOS (persiste ao desinstalar)"
-            else "storage: PRIVATE (apagado ao desinstalar) — dá permissão de ficheiros",
+            if (publicDl)
+                "downloads: /sdcard/MiniOS/downloads (persiste)"
+            else
+                "downloads: privado",
         )
+        lines.add("imports : /sdcard/MiniOS/imports")
         lines.add(
             "installed: ${status.isInstalled} " +
                 "(${status.distro ?: "—"}) " +
                 LinuxRootFs.formatSize(status.estimatedSizeBytes),
         )
-        lines.add("proot  : ${if (rt.isProotInstalled()) "ok (jniLibs)" else "MISSING — reinstall APK"}")
+        lines.add("proot  : ${if (rt.isProotInstalled()) "ok (jniLibs)" else "MISSING"}")
         lines.add("mounts : ${if (rt.isStorageReady()) "ok" else "corre setup-storage"}")
         lines.add("")
         if (!status.isInstalled) {
@@ -130,7 +134,6 @@ fun TerminalApp() {
             lines.add("libproot.so em falta — reinstala o APK")
         } else {
             lines.add("Linux pronto. uname -a | apt update | ls /sdcard/MiniOS")
-            lines.add("Segura texto ou toca Copiar")
             session = linuxManager.startSession()
             promptCwd = session?.cwd ?: "/root"
         }
@@ -173,11 +176,9 @@ fun TerminalApp() {
         val cmd = normalizeBuiltin(raw)
         when (cmd) {
             "help" -> {
-                lines.add("Setup:")
-                lines.add("  install | reinstall-rootfs | setup-runtime | setup-storage")
-                lines.add("  setup-dns | repair-dpkg | repair-proot | status | clear")
-                lines.add("  pkg-install <nome> | pkg-update")
-                lines.add("Pastas: /sdcard/MiniOS  /sdcard/Download  /minios")
+                lines.add("Setup: install | reinstall-rootfs | setup-runtime | setup-storage")
+                lines.add("  setup-dns | repair-dpkg | status | clear | pkg-install")
+                lines.add("Pastas: /sdcard/MiniOS  /sdcard/Download")
                 lines.add("")
                 return true
             }
@@ -198,10 +199,12 @@ fun TerminalApp() {
                         lines.add("installed: ${s.isInstalled}")
                     }
                     lines.add(
-                        if (LinuxConfig.isUsingPublicStorage(context))
-                            "storage : PUBLIC /sdcard/MiniOS"
-                        else
-                            "storage : PRIVATE (wiped on uninstall)",
+                        "downloads: ${
+                            if (LinuxConfig.isUsingPublicDownloads(context))
+                                "/sdcard/MiniOS/downloads"
+                            else
+                                "private"
+                        }",
                     )
                     rt.diagnostic().lines().forEach { lines.add(it) }
                     lines.add("")
@@ -240,12 +243,12 @@ fun TerminalApp() {
                 busy = true
                 session = null
                 scope.launch {
-                    lines.add("A apagar RootFS antigo e reinstalar...")
+                    lines.add("A apagar RootFS e reinstalar...")
                     scrollToBottom()
                     val r = linuxManager.reinstallRootFs()
                     busy = false
                     lines.add(
-                        if (r.isSuccess) "✓ reinstall-rootfs OK — agora: setup-runtime"
+                        if (r.isSuccess) "✓ reinstall-rootfs OK — setup-runtime"
                         else "✗ ${r.exceptionOrNull()?.message}",
                     )
                     lines.add("")
@@ -263,10 +266,9 @@ fun TerminalApp() {
                     val r = linuxManager.setupRuntime()
                     busy = false
                     if (r.isSuccess) {
-                        lines.add("✓ PRoot OK + DNS")
+                        lines.add("✓ PRoot OK")
                         session = linuxManager.startSession()
                         promptCwd = session?.cwd ?: "/root"
-                        lines.add("Sessão Linux ativa.")
                     } else {
                         lines.add("✗ ${r.exceptionOrNull()?.message}")
                     }
@@ -286,7 +288,7 @@ fun TerminalApp() {
                     busy = false
                     if (r.isSuccess) {
                         r.getOrNull()?.lines()?.forEach { lines.add(it) }
-                        lines.add("✓ setup-dns — tenta: apt update")
+                        lines.add("✓ setup-dns")
                     } else {
                         lines.add("✗ ${r.exceptionOrNull()?.message}")
                     }
@@ -302,8 +304,6 @@ fun TerminalApp() {
                 }
                 busy = true
                 scope.launch {
-                    lines.add("[DPKG] a reparar...")
-                    scrollToBottom()
                     val r = linuxManager.repairDpkg()
                     busy = false
                     if (r.isSuccess) {
@@ -386,7 +386,7 @@ fun TerminalApp() {
         if (lower.startsWith("pkg-install ") || lower == "pkg-install") {
             val pkg = cmd.removePrefix("pkg-install").removePrefix("PKG-INSTALL").trim()
             if (pkg.isEmpty()) {
-                lines.add("[INSTALL] uso: pkg-install <pacote>")
+                lines.add("uso: pkg-install <pacote>")
                 lines.add("")
                 scrollToBottom()
                 return
