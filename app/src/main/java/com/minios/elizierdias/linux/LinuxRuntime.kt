@@ -132,6 +132,13 @@ class LinuxRuntime(
         appendLine("resolv.conf: symlink=$symlink")
         appendLine("resolv body: $resolvBody")
         appendLine("rootfsReady: ${isRootFsReady()}")
+        appendLine(
+            "storage mode: ${
+                if (LinuxConfig.isUsingPublicStorage(context)) "PUBLIC /sdcard/MiniOS"
+                else "PRIVATE (wiped on uninstall)"
+            }",
+        )
+        appendLine("imports: ${LinuxConfig.importsDir(context).absolutePath}")
     }
 
     private fun forceExecutable(file: File) {
@@ -312,15 +319,31 @@ class LinuxRuntime(
                 val downloads = Environment.getExternalStoragePublicDirectory(
                     Environment.DIRECTORY_DOWNLOADS,
                 )
+
+                val publicMini = LinuxConfig.publicMiniOsDir()
+                publicMini.mkdirs()
+                LinuxConfig.importsDir(context).mkdirs()
+                LinuxConfig.downloadDir(context).mkdirs()
+                LinuxConfig.runtimeDir(context).mkdirs()
+
                 val mounts = mutableListOf<Pair<String, File>>()
                 if (external != null && external.exists()) mounts += "/sdcard" to external
                 if (downloads != null && downloads.exists()) mounts += "/sdcard/Download" to downloads
-                context.getExternalFilesDir(null)?.let { mounts += "/sdcard/MiniOS" to it }
+                if (publicMini.exists()) {
+                    mounts += "/sdcard/MiniOS" to publicMini
+                    mounts += "/minios" to publicMini
+                }
 
                 for ((linuxPath, androidPath) in mounts) {
                     File(rootfs, linuxPath.removePrefix("/")).parentFile?.mkdirs()
                     onProgress?.onProgress("storage: $linuxPath → ${androidPath.absolutePath}")
                 }
+                val usingPublic = LinuxConfig.isUsingPublicStorage(context)
+                onProgress?.onProgress(
+                    if (usingPublic) "RootFS em armazenamento público (persiste)"
+                    else "RootFS em storage privado (apagado ao desinstalar)",
+                )
+                onProgress?.onProgress("rootfs: ${LinuxConfig.rootfsDir(context).absolutePath}")
                 LinuxConfig.storageMarker(context).writeText("ok")
                 ensureDns()
                 onProgress?.onProgress("setup-storage: OK")
@@ -330,9 +353,6 @@ class LinuxRuntime(
             }
         }
 
-    /**
-     * Recover interrupted dpkg without wiping RootFS.
-     */
     suspend fun repairDpkg(onProgress: ProgressListener? = null): Result<String> =
         withContext(Dispatchers.IO) {
             try {
@@ -398,9 +418,6 @@ class LinuxRuntime(
             }
         }
 
-    /**
-     * One-time bootstrap; skip if marker present unless force=true.
-     */
     suspend fun ensureDebianBootstrap(
         force: Boolean = false,
         onProgress: ProgressListener? = null,
@@ -448,8 +465,10 @@ class LinuxRuntime(
         if (downloads != null && downloads.exists()) {
             args += listOf("-b", "${downloads.absolutePath}:/sdcard/Download")
         }
-        context.getExternalFilesDir(null)?.let {
-            args += listOf("-b", "${it.absolutePath}:/sdcard/MiniOS")
+        val publicMini = LinuxConfig.publicMiniOsDir()
+        if (publicMini.exists() || publicMini.mkdirs()) {
+            args += listOf("-b", "${publicMini.absolutePath}:/sdcard/MiniOS")
+            args += listOf("-b", "${publicMini.absolutePath}:/minios")
         }
 
         val shellPath = resolveShellPath(rootfsFile) ?: "/bin/sh"
