@@ -40,7 +40,7 @@ object AppRegistry {
     val softwareCenter =
         MiniApp(
             "software_center",
-            "Software Center",
+            "Software",
             Icons.Filled.Widgets,
             defaultSize = Size(540f, 400f),
         )
@@ -48,7 +48,7 @@ object AppRegistry {
     val mediaPlayer =
         MiniApp(
             "media_player",
-            "MediaPlayerOS",
+            "Media",
             Icons.Filled.Headphones,
             defaultSize = Size(560f, 420f),
         )
@@ -56,7 +56,7 @@ object AppRegistry {
     val linuxDesktop =
         MiniApp(
             "linux_desktop",
-            "Linux Desktop",
+            "Linux",
             Icons.Filled.Computer,
             defaultSize = Size(900f, 560f),
         )
@@ -77,7 +77,10 @@ object AppRegistry {
             defaultSize = Size(520f, 400f),
         )
 
-    /** Ordem no ecrã (scroll se não caber). Software Center incluído. */
+    /**
+     * Ordem fixa no desktop (grelha 2 colunas).
+     * Labels curtos para caber no ecrã.
+     */
     val desktopIcons: List<MiniApp> =
         listOf(
             files,

@@ -2,12 +2,11 @@ package com.minios.elizierdias.shell.desktop
 
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +14,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +35,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -117,19 +120,33 @@ fun Desktop() {
                     videoSound = wallpaperVideoSound,
                 )
 
-                // Ícones com scroll — nenhum app fica escondido fora do ecrã
+                // Grelha 2 colunas — todos os apps visíveis, com scroll se precisar
+                val icons = AppRegistry.desktopIcons
                 Column(
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(12.dp)
+                        .padding(start = 12.dp, top = 12.dp, end = 8.dp, bottom = 12.dp)
+                        .width(168.dp)
                         .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    AppRegistry.desktopIcons.forEach { app ->
-                        DesktopIcon(app = app, onOpen = {
-                            startMenuOpen = false
-                            launchApp(app)
-                        })
+                    icons.chunked(2).forEach { rowApps ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            rowApps.forEach { app ->
+                                DesktopIcon(
+                                    app = app,
+                                    onOpen = {
+                                        startMenuOpen = false
+                                        launchApp(app)
+                                    },
+                                )
+                            }
+                            if (rowApps.size == 1) {
+                                Spacer(modifier = Modifier.width(80.dp))
+                            }
+                        }
                     }
                 }
 
@@ -280,7 +297,7 @@ private fun WallpaperLayer(
 private fun DesktopIcon(app: MiniApp, onOpen: () -> Unit) {
     Column(
         modifier = Modifier
-            .width(72.dp)
+            .width(80.dp)
             .clickable { onOpen() },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -288,9 +305,17 @@ private fun DesktopIcon(app: MiniApp, onOpen: () -> Unit) {
             imageVector = app.icon,
             contentDescription = app.title,
             tint = Color.White,
-            modifier = Modifier.size(30.dp),
+            modifier = Modifier.size(28.dp),
         )
         Spacer(modifier = Modifier.height(4.dp))
-        Text(text = app.title, color = Color.White, fontSize = 11.sp)
+        Text(
+            text = app.title,
+            color = Color.White,
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
