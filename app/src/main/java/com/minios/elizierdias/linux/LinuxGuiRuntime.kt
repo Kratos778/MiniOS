@@ -68,16 +68,18 @@ class LinuxGuiRuntime(
     fun ensureXstartup(): String {
         val dir = vncDir()
         val startup = File(dir, "xstartup")
-        val script = """#!/bin/sh
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-[ -r \$HOME/.Xresources ] && xrdb \$HOME/.Xresources
-export DISPLAY=$displayName
-if command -v openbox >/dev/null 2>&1; then
-  openbox &
-fi
-exec xterm -geometry 100x30 -ls -title "MiniOS Linux"
-""".trimIndent()
+        // ${'$'}HOME = literal $HOME no shell (não interpolação Kotlin)
+        val homeRef = "${'$'}HOME"
+        val script =
+            "#!/bin/sh\n" +
+                "unset SESSION_MANAGER\n" +
+                "unset DBUS_SESSION_BUS_ADDRESS\n" +
+                "[ -r $homeRef/.Xresources ] && xrdb $homeRef/.Xresources\n" +
+                "export DISPLAY=$displayName\n" +
+                "if command -v openbox >/dev/null 2>&1; then\n" +
+                "  openbox &\n" +
+                "fi\n" +
+                "exec xterm -geometry 100x30 -ls -title \"MiniOS Linux\"\n"
         startup.writeText(script)
         startup.setExecutable(true, false)
         return startup.absolutePath
@@ -189,12 +191,11 @@ exec xterm -geometry 100x30 -ls -title "MiniOS Linux"
      * Workaround dbus postinst (statoverride Operation not permitted no PRoot).
      */
     suspend fun fixDbusStatoverride(): Result<String> = withContext(Dispatchers.IO) {
-        val cmd = """
-            mkdir -p /var/lib/dpkg
-            touch /var/lib/dpkg/statoverride 2>/dev/null || true
-            DEBIAN_FRONTEND=noninteractive dpkg --configure -a 2>&1 || true
-            echo DONE
-        """.trimIndent()
+        val cmd =
+            "mkdir -p /var/lib/dpkg; " +
+                "touch /var/lib/dpkg/statoverride 2>/dev/null || true; " +
+                "DEBIAN_FRONTEND=noninteractive dpkg --configure -a 2>&1 || true; " +
+                "echo DONE"
         val r = runtime.exec(cmd, timeoutSec = 120)
         val body = buildString {
             r.getOrNull()?.let {
