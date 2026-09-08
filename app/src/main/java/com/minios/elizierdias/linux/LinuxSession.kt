@@ -3,11 +3,6 @@
  * MiniOS - Desktop-style environment for Android
  *
  * PROPRIETARY SOFTWARE — All Rights Reserved.
- * This file is part of MiniOS.
- * See LICENSE and COPYRIGHT.md for full terms.
- *
- * Unauthorized copying, modification, distribution or reuse of this file,
- * via any medium, is strictly prohibited without prior written permission.
  */
 
 package com.minios.elizierdias.linux
@@ -20,9 +15,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Sessão de shell Linux no Terminal.
- *
- * Ainda não é PTY interativo completo: cada comando corre via proot+bash -c,
- * mas mantém cwd e variáveis de ambiente entre comandos (como um shell simples).
+ * Cada comando corre via proot+bash -c, com cwd/env persistentes.
  */
 class LinuxSession(
     private val runtime: LinuxRuntime,
@@ -34,11 +27,9 @@ class LinuxSession(
     private val _output = MutableStateFlow<List<String>>(emptyList())
     val output: StateFlow<List<String>> = _output.asStateFlow()
 
-    /** Working directory persistente na sessão */
     var cwd: String = "/root"
         private set
 
-    /** Env vars da sessão (export) */
     private val sessionEnv = mutableMapOf(
         "HOME" to "/root",
         "USER" to "root",
@@ -46,38 +37,49 @@ class LinuxSession(
         "TERM" to "xterm-256color",
         "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         "LANG" to "C.UTF-8",
+        "DEBIAN_FRONTEND" to "noninteractive",
     )
 
     fun envSnapshot(): Map<String, String> = sessionEnv.toMap()
 
     /**
-     * Executa um comando na sessão (cwd + env persistentes).
+     * apt/dpkg pode demorar muitos minutos. O default do runtime (120s)
+     * matava o processo a meio → “shutdown” + RootFS a engordar.
      */
+    private fun timeoutFor(command: String): Long {
+        val c = command.lowercase()
+        val longJob =
+            c.contains("apt-get") ||
+                c.contains("apt ") ||
+                c.startsWith("apt") ||
+                c.contains("dpkg") ||
+                c.contains("pkg-install") ||
+                c.contains("tigervnc") ||
+                c.contains("openbox") ||
+                c.contains("install -y")
+        return if (longJob) 2_400L else 180L // 40 min vs 3 min
+    }
+
     suspend fun execute(command: String): String = withContext(Dispatchers.IO) {
         if (!_isAlive.value) return@withContext ""
 
         val trimmed = command.trim()
         if (trimmed.isEmpty()) return@withContext ""
 
-        // cd isolado
         if (trimmed == "cd" || trimmed.startsWith("cd ")) {
             return@withContext handleCd(trimmed)
         }
 
-        // export VAR=value
         if (trimmed.startsWith("export ")) {
             return@withContext handleExport(trimmed.removePrefix("export ").trim())
         }
 
-        // pwd local (rápido)
         if (trimmed == "pwd") {
             appendOutput(listOf(cwd))
             return@withContext cwd
         }
 
-        // Comando real via PRoot, com cwd e env da sessão
         val wrapped = buildString {
-            // exports
             sessionEnv.forEach { (k, v) ->
                 append("export ")
                 append(shellQuote(k))
@@ -91,12 +93,16 @@ class LinuxSession(
             append(trimmed)
         }
 
-        val result = runtime.exec(wrapped)
+        val timeout = timeoutFor(trimmed)
+        val result = runtime.exec(wrapped, timeoutSec = timeout)
         val lines = mutableListOf<String>()
 
         if (result.isFailure) {
             val msg = result.exceptionOrNull()?.message ?: "unknown error"
             lines.add("error: $msg")
+            if (msg.contains("timed out", ignoreCase = true)) {
+                lines.add("(comando longo cortado — usa repair-dpkg e tenta de novo)")
+            }
             appendOutput(lines)
             return@withContext lines.joinToString("\n")
         }
@@ -128,11 +134,9 @@ class LinuxSession(
                 "$base/$arg"
             }
         }
-        // Normaliza // e .
         val normalized = normalizePath(target)
 
-        // Verifica se o diretório existe dentro do RootFS via proot
-        val check = runtime.exec("test -d ${shellQuote(normalized)} && echo OK")
+        val check = runtime.exec("test -d ${shellQuote(normalized)} && echo OK", timeoutSec = 30)
         val ok = check.getOrNull()?.stdout?.contains("OK") == true
         if (!ok) {
             val msg = "cd: $normalized: No such file or directory"
