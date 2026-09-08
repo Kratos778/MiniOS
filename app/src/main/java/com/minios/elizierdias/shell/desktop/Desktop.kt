@@ -2,6 +2,8 @@ package com.minios.elizierdias.shell.desktop
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -115,13 +117,15 @@ fun Desktop() {
                     videoSound = wallpaperVideoSound,
                 )
 
+                // Ícones com scroll — nenhum app fica escondido fora do ecrã
                 Column(
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                        .padding(12.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    AppRegistry.all.forEach { app ->
+                    AppRegistry.desktopIcons.forEach { app ->
                         DesktopIcon(app = app, onOpen = {
                             startMenuOpen = false
                             launchApp(app)

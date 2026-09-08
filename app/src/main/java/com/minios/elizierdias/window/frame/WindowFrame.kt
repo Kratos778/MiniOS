@@ -54,22 +54,18 @@ fun WindowFrame(
     onToggleMaximize: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    // Minimizada: manter content na composição (Terminal/histórico não some)
-    if (window.isMinimized) {
-        Box(modifier = Modifier.size(0.dp)) {
-            content()
-        }
-        return
-    }
-
     val density = LocalDensity.current
     val windowWidth = with(density) { window.size.width.toDp() }
     val windowHeight = with(density) { window.size.height.toDp() }
 
     var dragPos by remember(window.instanceId) { mutableStateOf(window.position) }
 
-    Box(
-        modifier = Modifier
+    // IMPORTANTE: content() está SEMPRE no mesmo sítio da árvore Compose.
+    // Minimizar só esconde a moldura (size 0) — não remonta Files/Terminal/etc.
+    val frameModifier = if (window.isMinimized) {
+        Modifier.size(0.dp)
+    } else {
+        Modifier
             .offset { IntOffset(window.position.x.toInt(), window.position.y.toInt()) }
             .size(width = windowWidth, height = windowHeight)
             .zIndex(window.zIndex.toFloat())
@@ -84,7 +80,6 @@ fun WindowFrame(
             )
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF161B22))
-            // Toque na janela → foca (antes do conteúdo)
             .pointerInput(window.instanceId) {
                 awaitPointerEventScope {
                     while (true) {
@@ -94,84 +89,93 @@ fun WindowFrame(
                         }
                     }
                 }
-            },
-    ) {
+            }
+    }
+
+    Box(modifier = frameModifier) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Barra de título — arrastar para mover
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(36.dp)
-                    .background(
-                        if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128),
+            if (!window.isMinimized) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp)
+                        .background(
+                            if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128),
+                        )
+                        .pointerInput(window.instanceId, window.isMaximized) {
+                            if (window.isMaximized) return@pointerInput
+                            detectDragGestures(
+                                onDragStart = {
+                                    onFocus()
+                                    dragPos = window.position
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragPos += dragAmount
+                                    onMove(dragPos)
+                                },
+                            )
+                        }
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = window.app.icon,
+                        contentDescription = null,
+                        tint = Color(0xFFC9D1D9),
+                        modifier = Modifier
+                            .padding(start = 4.dp)
+                            .size(16.dp),
                     )
-                    .pointerInput(window.instanceId, window.isMaximized) {
-                        if (window.isMaximized) return@pointerInput
-                        detectDragGestures(
-                            onDragStart = {
-                                onFocus()
-                                dragPos = window.position
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                dragPos += dragAmount
-                                onMove(dragPos)
-                            },
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = window.app.title,
+                        color = Color(0xFFC9D1D9),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                    )
+                    IconButton(onClick = onMinimize, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Filled.Minimize,
+                            "Minimize",
+                            tint = Color(0xFF8B949E),
+                            modifier = Modifier.size(14.dp),
                         )
                     }
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = window.app.icon,
-                    contentDescription = null,
-                    tint = Color(0xFFC9D1D9),
-                    modifier = Modifier
-                        .padding(start = 4.dp)
-                        .size(16.dp),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = window.app.title,
-                    color = Color(0xFFC9D1D9),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                )
-                IconButton(onClick = onMinimize, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Filled.Minimize,
-                        "Minimize",
-                        tint = Color(0xFF8B949E),
-                        modifier = Modifier.size(14.dp),
-                    )
-                }
-                IconButton(onClick = onToggleMaximize, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Filled.CropSquare,
-                        "Maximize",
-                        tint = Color(0xFF8B949E),
-                        modifier = Modifier.size(14.dp),
-                    )
-                }
-                IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Filled.Close,
-                        "Close",
-                        tint = Color(0xFFF85149),
-                        modifier = Modifier.size(14.dp),
-                    )
+                    IconButton(onClick = onToggleMaximize, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Filled.CropSquare,
+                            "Maximize",
+                            tint = Color(0xFF8B949E),
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                    IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Filled.Close,
+                            "Close",
+                            tint = Color(0xFFF85149),
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
                 }
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            // Mesmo slot Compose sempre — estado sobrevive ao minimizar
+            Box(
+                modifier = if (window.isMinimized) {
+                    Modifier.size(0.dp)
+                } else {
+                    Modifier.weight(1f).fillMaxWidth()
+                },
+            ) {
                 content()
             }
         }
 
-        // Handle de resize canto inferior direito
-        if (!window.isMaximized) {
+        if (!window.isMinimized && !window.isMaximized) {
             var resizeSize by remember(window.instanceId) { mutableStateOf(window.size) }
             Box(
                 modifier = Modifier
