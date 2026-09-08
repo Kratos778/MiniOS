@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.minios.elizierdias.linux.LinuxConfig
 import com.minios.elizierdias.linux.LinuxManager
 import com.minios.elizierdias.linux.LinuxRootFs
 import com.minios.elizierdias.linux.LinuxSession
@@ -104,29 +105,32 @@ fun TerminalApp() {
         linuxManager.initialize()
         val status = linuxManager.getRootFs().status()
         val rt = linuxManager.getRuntime()
+        val publicMode = LinuxConfig.isUsingPublicStorage(context)
         lines.add("── estado ──")
         lines.add(statusMessage)
         lines.add("rootfs : ${status.rootfsPath}")
+        lines.add(
+            if (publicMode) "storage: PUBLIC /sdcard/MiniOS (persiste ao desinstalar)"
+            else "storage: PRIVATE (apagado ao desinstalar) — dá permissão de ficheiros",
+        )
         lines.add(
             "installed: ${status.isInstalled} " +
                 "(${status.distro ?: "—"}) " +
                 LinuxRootFs.formatSize(status.estimatedSizeBytes),
         )
         lines.add("proot  : ${if (rt.isProotInstalled()) "ok (jniLibs)" else "MISSING — reinstall APK"}")
-        lines.add("storage: ${if (rt.isStorageReady()) "ok" else "corre setup-storage"}")
-        rt.diagnostic().lines().forEach { lines.add(it) }
+        lines.add("mounts : ${if (rt.isStorageReady()) "ok" else "corre setup-storage"}")
         lines.add("")
         if (!status.isInstalled) {
-            lines.add("1) install   (ou reinstall-rootfs se estiver partido)")
+            lines.add("1) install")
             lines.add("2) setup-runtime")
             lines.add("3) setup-storage")
             lines.add("4) setup-dns")
-            lines.add("5) repair-dpkg  (se dpkg interrupted)")
         } else if (!rt.isProotInstalled()) {
             lines.add("libproot.so em falta — reinstala o APK")
         } else {
-            lines.add("Linux pronto. setup-dns | repair-dpkg | apt update | uname -a")
-            lines.add("pkg-install python3  |  Segura texto ou toca Copiar")
+            lines.add("Linux pronto. uname -a | apt update | ls /sdcard/MiniOS")
+            lines.add("Segura texto ou toca Copiar")
             session = linuxManager.startSession()
             promptCwd = session?.cwd ?: "/root"
         }
@@ -172,8 +176,8 @@ fun TerminalApp() {
                 lines.add("Setup:")
                 lines.add("  install | reinstall-rootfs | setup-runtime | setup-storage")
                 lines.add("  setup-dns | repair-dpkg | repair-proot | status | clear")
-                lines.add("  pkg-install <nome> | pkg-update  (APT idempotente)")
-                lines.add("Linux: uname -a | ls / | cd /sdcard | apt update")
+                lines.add("  pkg-install <nome> | pkg-update")
+                lines.add("Pastas: /sdcard/MiniOS  /sdcard/Download  /minios")
                 lines.add("")
                 return true
             }
@@ -193,6 +197,12 @@ fun TerminalApp() {
                         lines.add("rootfs  : ${s.rootfsPath}")
                         lines.add("installed: ${s.isInstalled}")
                     }
+                    lines.add(
+                        if (LinuxConfig.isUsingPublicStorage(context))
+                            "storage : PUBLIC /sdcard/MiniOS"
+                        else
+                            "storage : PRIVATE (wiped on uninstall)",
+                    )
                     rt.diagnostic().lines().forEach { lines.add(it) }
                     lines.add("")
                     scrollToBottom()
@@ -292,13 +302,13 @@ fun TerminalApp() {
                 }
                 busy = true
                 scope.launch {
-                    lines.add("[DPKG] a reparar (configure -a / apt -f)...")
+                    lines.add("[DPKG] a reparar...")
                     scrollToBottom()
                     val r = linuxManager.repairDpkg()
                     busy = false
                     if (r.isSuccess) {
                         r.getOrNull()?.lines()?.forEach { lines.add(it) }
-                        lines.add("✓ repair-dpkg OK — tenta: apt-get update")
+                        lines.add("✓ repair-dpkg OK")
                     } else {
                         lines.add("✗ ${r.exceptionOrNull()?.message}")
                     }
@@ -335,7 +345,7 @@ fun TerminalApp() {
                     val r = linuxManager.repairProot()
                     busy = false
                     lines.add(
-                        if (r.isSuccess) "✓ repair OK — tenta: uname -a"
+                        if (r.isSuccess) "✓ repair OK"
                         else "✗ ${r.exceptionOrNull()?.message}",
                     )
                     lines.add("")
@@ -353,7 +363,7 @@ fun TerminalApp() {
                     val r = linuxManager.setupStorage()
                     busy = false
                     lines.add(
-                        if (r.isSuccess) "✓ storage OK — ls /sdcard"
+                        if (r.isSuccess) "✓ storage OK — ls /sdcard/MiniOS"
                         else "✗ ${r.exceptionOrNull()?.message}",
                     )
                     lines.add("")
