@@ -13,10 +13,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
-/**
- * Sessão de shell Linux no Terminal.
- * Output pode ser streamado linha a linha (apt/wget progress).
- */
 class LinuxSession(
     private val runtime: LinuxRuntime,
 ) {
@@ -93,12 +89,8 @@ class LinuxSession(
             append("cd ")
             append(shellQuote(cwd))
             append(" && ")
-            // stdbuf pode não existir — fallback sem ele
-            append("(command -v stdbuf >/dev/null 2>&1 && stdbuf -oL -eL ")
-            append(shellQuote(trimmed))
-            append(" || ")
-            append(shellQuote(trimmed))
-            append(") 2>&1")
+            append(trimmed)
+            append(" 2>&1")
         }
 
         val timeout = timeoutFor(trimmed)
