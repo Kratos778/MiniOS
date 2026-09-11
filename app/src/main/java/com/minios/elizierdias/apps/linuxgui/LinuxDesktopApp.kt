@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2026 Elizier Layerti Gungui Dias
- * MiniOS - Desktop-style environment for Android
+ * NoskOS - Desktop-style environment for Android
  *
  * PROPRIETARY SOFTWARE — All Rights Reserved.
  */
@@ -39,9 +39,9 @@ import com.minios.elizierdias.linux.LinuxManager
 import kotlinx.coroutines.launch
 
 /**
- * Janela MiniOS para a sessão gráfica Linux (TigerVNC).
+ * Janela NoskOS para a sessão gráfica Linux (TigerVNC).
  * Geometria = ecrã do telefone/tablet.
- * O ecrã RFB (pixels do Linux) entra no próximo passo (cliente VNC nativo).
+ * Próximo passo: cliente VNC nativo que mostra o ecrã Linux dentro desta janela.
  */
 @Composable
 fun LinuxDesktopApp() {
@@ -52,7 +52,7 @@ fun LinuxDesktopApp() {
         LinuxGuiRuntime(context, manager.getRuntime())
     }
 
-    var log by remember { mutableStateOf("Linux GUI · TigerVNC\n") }
+    var log by remember { mutableStateOf("NoskOS Linux GUI · TigerVNC\n") }
     var busy by remember { mutableStateOf(false) }
     var running by remember { mutableStateOf(false) }
     var geometry by remember { mutableStateOf(gui.deviceGeometry()) }
@@ -68,9 +68,10 @@ fun LinuxDesktopApp() {
         append("[GUI] geometria ecrã: $geometry")
         append("[GUI] ${st.message}")
         append("")
-        append("1) Iniciar sessão VNC")
-        append("2) Cliente VNC nativo (próximo update) mostra o ecrã Linux aqui")
-        append("3) No Terminal podes testar: vncserver -list")
+        append("Fluxo recomendado:")
+        append("1) Instalar pacotes (só na 1ª vez)")
+        append("2) Iniciar VNC")
+        append("3) Cliente VNC nativo (próximo update) mostra o ecrã aqui")
     }
 
     Column(
@@ -95,10 +96,31 @@ fun LinuxDesktopApp() {
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Linha 1: principais
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
+            Button(
+                onClick = {
+                    if (busy) return@Button
+                    busy = true
+                    scope.launch {
+                        append("[GUI] A instalar pacotes VNC (tigervnc + openbox + xterm)...")
+                        val r = gui.ensureGuiPackages { msg -> append(msg) }
+                        busy = false
+                        if (r.isSuccess) {
+                            append(r.getOrNull() ?: "OK")
+                        } else {
+                            append("[ERROR] ${r.exceptionOrNull()?.message}")
+                        }
+                    }
+                },
+                enabled = !busy,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+            ) {
+                Text("Instalar pacotes", fontSize = 11.sp)
+            }
             Button(
                 onClick = {
                     if (busy) return@Button
@@ -119,8 +141,17 @@ fun LinuxDesktopApp() {
                 enabled = !busy,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
             ) {
-                Text("Iniciar VNC", fontSize = 12.sp)
+                Text("Iniciar VNC", fontSize = 11.sp)
             }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Linha 2: controlo
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
             Button(
                 onClick = {
                     if (busy) return@Button
@@ -135,7 +166,7 @@ fun LinuxDesktopApp() {
                 enabled = !busy,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDA3633)),
             ) {
-                Text("Parar", fontSize = 12.sp)
+                Text("Parar", fontSize = 11.sp)
             }
             Button(
                 onClick = {
@@ -152,7 +183,7 @@ fun LinuxDesktopApp() {
                 enabled = !busy,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D)),
             ) {
-                Text("Status", fontSize = 12.sp)
+                Text("Status", fontSize = 11.sp)
             }
         }
 
