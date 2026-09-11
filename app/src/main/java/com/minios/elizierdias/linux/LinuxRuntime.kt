@@ -75,10 +75,10 @@ class LinuxRuntime(
     fun isFullyReady(): Boolean = isRootFsReady() && isProotInstalled()
 
     fun diagnostic(): String = buildString {
-        appendLine("nativeLibraryDir: ${libDir()?.absolutePath ?: \"null\"}")
-        appendLine("libproot.so: ${prootFile()?.absolutePath ?: \"MISSING\"}")
-        appendLine("rootfs: ${LinuxConfig.rootfsDir(context).absolutePath}")
-        appendLine("rootfsReady: ${isRootFsReady()}")
+        appendLine("nativeLibraryDir: " + (libDir()?.absolutePath ?: "null"))
+        appendLine("libproot.so: " + (prootFile()?.absolutePath ?: "MISSING"))
+        appendLine("rootfs: " + LinuxConfig.rootfsDir(context).absolutePath)
+        appendLine("rootfsReady: " + isRootFsReady())
     }
 
     private fun forceExecutable(file: File) {
@@ -154,9 +154,9 @@ class LinuxRuntime(
             try {
                 LinuxConfig.tmpDir(context).mkdirs()
                 val proot = prootFile()
-                    ?: return@withContext Result.failure(IllegalStateException("libproot.so not in APK.\n${diagnostic()}"))
+                    ?: return@withContext Result.failure(IllegalStateException("libproot.so not in APK.\n" + diagnostic()))
                 if (!isRootFsReady()) {
-                    return@withContext Result.failure(IllegalStateException("RootFS incomplete.\n${diagnostic()}"))
+                    return@withContext Result.failure(IllegalStateException("RootFS incomplete.\n" + diagnostic()))
                 }
                 forceExecutable(proot)
                 loaderFile()?.let { forceExecutable(it) }
@@ -291,7 +291,7 @@ class LinuxRuntime(
                 }
             }
             throw IllegalStateException(
-                "Cannot start proot.\n${diagnostic()}\ndirect: ${e1.message}\nlinker: ${last.message}",
+                "Cannot start proot.\n" + diagnostic() + "\ndirect: " + e1.message + "\nlinker: " + last.message,
                 last,
             )
         }
@@ -303,10 +303,10 @@ class LinuxRuntime(
     ): Result<ExecResult> = withContext(Dispatchers.IO) {
         try {
             if (!isRootFsReady()) {
-                return@withContext Result.failure(IllegalStateException("RootFS not ready.\n${diagnostic()}"))
+                return@withContext Result.failure(IllegalStateException("RootFS not ready.\n" + diagnostic()))
             }
             if (!isProotInstalled()) {
-                return@withContext Result.failure(IllegalStateException("libproot.so missing.\n${diagnostic()}"))
+                return@withContext Result.failure(IllegalStateException("libproot.so missing.\n" + diagnostic()))
             }
             ensureDns()
             prepareLinkLibs()
@@ -360,10 +360,10 @@ class LinuxRuntime(
     ): Result<ExecResult> = withContext(Dispatchers.IO) {
         try {
             if (!isRootFsReady()) {
-                return@withContext Result.failure(IllegalStateException("RootFS not ready.\n${diagnostic()}"))
+                return@withContext Result.failure(IllegalStateException("RootFS not ready.\n" + diagnostic()))
             }
             if (!isProotInstalled()) {
-                return@withContext Result.failure(IllegalStateException("libproot.so missing.\n${diagnostic()}"))
+                return@withContext Result.failure(IllegalStateException("libproot.so missing.\n" + diagnostic()))
             }
             ensureDns()
             prepareLinkLibs()
