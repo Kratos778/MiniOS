@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2026 Elizier Layerti Gungui Dias
- * MiniOS - Desktop-style environment for Android
+ * NoskOS - Desktop-style environment for Android
  *
  * PROPRIETARY SOFTWARE — All Rights Reserved.
  */
@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 /**
  * Sessão de shell Linux no Terminal.
  * Cada comando corre via proot+bash -c, com cwd/env persistentes.
+ * Output pode ser streamado linha a linha (apt/wget progress).
  */
 class LinuxSession(
     private val runtime: LinuxRuntime,
@@ -42,10 +43,6 @@ class LinuxSession(
 
     fun envSnapshot(): Map<String, String> = sessionEnv.toMap()
 
-    /**
-     * apt/dpkg pode demorar muitos minutos. O default do runtime (120s)
-     * matava o processo a meio → “shutdown” + RootFS a engordar.
-     */
     private fun timeoutFor(command: String): Long {
         val c = command.lowercase()
         val longJob =
@@ -56,11 +53,21 @@ class LinuxSession(
                 c.contains("pkg-install") ||
                 c.contains("tigervnc") ||
                 c.contains("openbox") ||
-                c.contains("install -y")
-        return if (longJob) 2_400L else 180L // 40 min vs 3 min
+                c.contains("install -y") ||
+                c.contains("wget") ||
+                c.contains("curl") ||
+                c.contains("falkon")
+        return if (longJob) 2_400L else 180L
     }
 
-    suspend fun execute(command: String): String = withContext(Dispatchers.IO) {
+    /**
+     * @param onLine chamado em tempo real por cada linha de stdout/stderr (thread de IO).
+     * O Terminal deve reencaminhar para a Main thread ao actualizar a UI.
+     */
+    suspend fun execute(
+        command: String,
+        onLine: ((String) -> Unit)? = null,
+    ): String = withContext(Dispatchers.IO) {
         if (!_isAlive.value) return@withContext ""
 
         val trimmed = command.trim()
@@ -76,6 +83,7 @@ class LinuxSession(
 
         if (trimmed == "pwd") {
             appendOutput(listOf(cwd))
+            onLine?.invoke(cwd)
             return@withContext cwd
         }
 
@@ -90,35 +98,52 @@ class LinuxSession(
             append("cd ")
             append(shellQuote(cwd))
             append(" && ")
+            // Forçar linha a linha em ferramentas comuns de progresso
+            append("stdbuf -oL -eL ")
             append(trimmed)
+            append(" 2>&1")
         }
 
         val timeout = timeoutFor(trimmed)
-        val result = runtime.exec(wrapped, timeoutSec = timeout)
+        val result = if (onLine != null) {
+            runtime.execStreaming(wrapped, timeoutSec = timeout, onLine = onLine)
+        } else {
+            runtime.exec(wrapped, timeoutSec = timeout)
+        }
+
         val lines = mutableListOf<String>()
 
         if (result.isFailure) {
             val msg = result.exceptionOrNull()?.message ?: "unknown error"
             lines.add("error: $msg")
             if (msg.contains("timed out", ignoreCase = true)) {
-                lines.add("(comando longo cortado — usa repair-dpkg e tenta de novo)")
+                lines.add("(comando longo cortado — tenta de novo ou repair-dpkg)")
+            }
+            if (onLine == null) appendOutput(lines)
+            else lines.forEach { onLine(it) }
+            return@withContext lines.joinToString("\n")
+        }
+
+        val exec = result.getOrThrow()
+        // Se já streamou, não duplicar tudo no return — só resumo se vazio
+        if (onLine == null) {
+            if (exec.stdout.isNotBlank()) {
+                exec.stdout.lines().forEach { lines.add(it) }
+            }
+            if (exec.stderr.isNotBlank()) {
+                exec.stderr.lines().forEach { lines.add(it) }
+            }
+            if (exec.exitCode != 0 && lines.isEmpty()) {
+                lines.add("[exit ${exec.exitCode}]")
             }
             appendOutput(lines)
             return@withContext lines.joinToString("\n")
         }
 
-        val exec = result.getOrThrow()
-        if (exec.stdout.isNotBlank()) {
-            exec.stdout.lines().forEach { lines.add(it) }
+        if (exec.exitCode != 0) {
+            onLine("[exit ${exec.exitCode}]")
         }
-        if (exec.stderr.isNotBlank()) {
-            exec.stderr.lines().forEach { lines.add(it) }
-        }
-        if (exec.exitCode != 0 && lines.isEmpty()) {
-            lines.add("[exit ${exec.exitCode}]")
-        }
-        appendOutput(lines)
-        lines.joinToString("\n")
+        exec.stdout // já foi streamado
     }
 
     private suspend fun handleCd(cmd: String): String {
