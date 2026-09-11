@@ -24,5 +24,5 @@ jobs:
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
-          name: MiniOS-release-unsigned.apk
+          name: NoskOS-release-unsigned.apk
           path: app/build/outputs/apk/release/*.apk
