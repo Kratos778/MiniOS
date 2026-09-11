@@ -41,5 +41,5 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: MiniOS-debug.apk
+          name: NoskOS-debug.apk
           path: app/build/outputs/apk/debug/*.apk
