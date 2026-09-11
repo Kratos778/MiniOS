@@ -48,6 +48,7 @@ class LinuxSession(
                 c.contains("pkg-install") ||
                 c.contains("tigervnc") ||
                 c.contains("openbox") ||
+                c.contains("vncserver") ||
                 c.contains("install -y") ||
                 c.contains("wget") ||
                 c.contains("curl") ||
@@ -55,6 +56,10 @@ class LinuxSession(
         return if (longJob) 2_400L else 180L
     }
 
+    /**
+     * Executa um comando (pode ser multi-linha / heredoc).
+     * Scripts multi-linha passam por `bash -s` para preservar <<EOF.
+     */
     suspend fun execute(
         command: String,
         onLine: ((String) -> Unit)? = null,
@@ -64,18 +69,21 @@ class LinuxSession(
         val trimmed = command.trim()
         if (trimmed.isEmpty()) return@withContext ""
 
-        if (trimmed == "cd" || trimmed.startsWith("cd ")) {
-            return@withContext handleCd(trimmed)
-        }
+        val isMultiLine = trimmed.contains('\n')
 
-        if (trimmed.startsWith("export ")) {
-            return@withContext handleExport(trimmed.removePrefix("export ").trim())
-        }
-
-        if (trimmed == "pwd") {
-            appendOutput(listOf(cwd))
-            onLine?.invoke(cwd)
-            return@withContext cwd
+        // Builtins só em linha única
+        if (!isMultiLine) {
+            if (trimmed == "cd" || trimmed.startsWith("cd ")) {
+                return@withContext handleCd(trimmed)
+            }
+            if (trimmed.startsWith("export ")) {
+                return@withContext handleExport(trimmed.removePrefix("export ").trim())
+            }
+            if (trimmed == "pwd") {
+                appendOutput(listOf(cwd))
+                onLine?.invoke(cwd)
+                return@withContext cwd
+            }
         }
 
         val wrapped = buildString {
@@ -89,7 +97,14 @@ class LinuxSession(
             append("cd ")
             append(shellQuote(cwd))
             append(" && ")
-            append(trimmed)
+            if (isMultiLine) {
+                // bash -s lê o script do stdin embutido — heredocs funcionam
+                append("bash -s <<'NOSKOS_EOF'\n")
+                append(trimmed)
+                append("\nNOSKOS_EOF")
+            } else {
+                append(trimmed)
+            }
             append(" 2>&1")
         }
 
