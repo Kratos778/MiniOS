@@ -18,9 +18,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -51,7 +51,6 @@ import com.minios.elizierdias.linux.LinuxRootFs
 import com.minios.elizierdias.linux.LinuxSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
 fun TerminalApp() {
@@ -74,6 +73,7 @@ fun TerminalApp() {
         mutableStateListOf(
             "NoskOS Linux Terminal",
             "Debian ARM64 via PRoot (sem root)",
+            "Multi-linha OK — cola script e toca Run",
             "",
         )
     }
@@ -95,11 +95,6 @@ fun TerminalApp() {
         scope.launch {
             scrollState.animateScrollTo(scrollState.maxValue)
         }
-    }
-
-    fun addLine(line: String) {
-        lines.add(line)
-        scrollToBottom()
     }
 
     fun copyAll() {
@@ -140,7 +135,7 @@ fun TerminalApp() {
         } else if (!rt.isProotInstalled()) {
             lines.add("libproot.so em falta — reinstala o APK")
         } else {
-            lines.add("Linux pronto. uname -a | apt update | ls /sdcard/MiniOS")
+            lines.add("Linux pronto. uname -a | apt update | start-vnc")
             session = linuxManager.startSession()
             promptCwd = session?.cwd ?: "/root"
         }
@@ -175,6 +170,8 @@ fun TerminalApp() {
                 "setup-dns"
             "repair-dpkg", "repairdpkg", "fix-dpkg", "dpkg-configure" ->
                 "repair-dpkg"
+            "start-vnc", "startvnc", "vnc-start" ->
+                "start-vnc"
             else -> cmd.trim()
         }
     }
@@ -185,12 +182,48 @@ fun TerminalApp() {
             "help" -> {
                 lines.add("Setup: install | reinstall-rootfs | setup-runtime | setup-storage")
                 lines.add("  setup-dns | repair-dpkg | status | clear | pkg-install")
+                lines.add("VNC: start-vnc")
+                lines.add("Multi-linha: cola o script e toca Run")
                 lines.add("Pastas: /sdcard/MiniOS  /sdcard/Download")
                 lines.add("")
                 return true
             }
             "clear" -> {
                 lines.clear()
+                return true
+            }
+            "start-vnc" -> {
+                if (busy) {
+                    lines.add("ocupado...")
+                    return true
+                }
+                busy = true
+                val script =
+                    """
+                    export HOME=/root USER=root
+                    mkdir -p /root/.vnc
+                    printf '%s\n' '#!/bin/sh' 'unset SESSION_MANAGER' 'unset DBUS_SESSION_BUS_ADDRESS' 'export DISPLAY=:1' 'openbox &' 'exec xterm -geometry 100x30 -ls -title NoskOS' > /root/.vnc/xstartup
+                    chmod +x /root/.vnc/xstartup
+                    vncserver -kill :1 2>/dev/null || true
+                    vncserver :1 -geometry 1640x720 -depth 24 -localhost yes -SecurityTypes None -xstartup /root/.vnc/xstartup
+                    echo "---"
+                    vncserver -list
+                    echo "---"
+                    ls -la /root/.vnc/ || true
+                    """.trimIndent()
+                val s = session ?: linuxManager.startSession().also { session = it }
+                scope.launch {
+                    lines.add("${prompt()} start-vnc")
+                    s.execute(script) { line ->
+                        scope.launch(Dispatchers.Main) {
+                            lines.add(line)
+                            scrollToBottom()
+                        }
+                    }
+                    busy = false
+                    lines.add("")
+                    scrollToBottom()
+                }
                 return true
             }
             "status" -> {
@@ -383,50 +416,57 @@ fun TerminalApp() {
     }
 
     fun run(cmd: String) {
-        lines.add("${prompt()} $cmd")
+        val display = if (cmd.contains('\n')) {
+            cmd.lineSequence().firstOrNull()?.trim().orEmpty() + " …(${cmd.lines().size} linhas)"
+        } else {
+            cmd
+        }
+        lines.add("${prompt()} $display")
         if (cmd.isBlank()) {
             lines.add("")
             scrollToBottom()
             return
         }
-        val lower = cmd.lowercase()
-        if (lower.startsWith("pkg-install ") || lower == "pkg-install") {
-            val pkg = cmd.removePrefix("pkg-install").removePrefix("PKG-INSTALL").trim()
-            if (pkg.isEmpty()) {
-                lines.add("uso: pkg-install <pacote>")
-                lines.add("")
-                scrollToBottom()
-                return
-            }
-            if (busy) {
-                lines.add("ocupado...")
-                scrollToBottom()
-                return
-            }
-            busy = true
-            scope.launch {
-                val r = linuxManager.getPackageManager().install(pkg) { msg ->
-                    lines.add(msg)
+        // Builtins só se for uma linha
+        if (!cmd.contains('\n')) {
+            val lower = cmd.lowercase()
+            if (lower.startsWith("pkg-install ") || lower == "pkg-install") {
+                val pkg = cmd.removePrefix("pkg-install").removePrefix("PKG-INSTALL").trim()
+                if (pkg.isEmpty()) {
+                    lines.add("uso: pkg-install <pacote>")
+                    lines.add("")
+                    scrollToBottom()
+                    return
+                }
+                if (busy) {
+                    lines.add("ocupado...")
+                    scrollToBottom()
+                    return
+                }
+                busy = true
+                scope.launch {
+                    val r = linuxManager.getPackageManager().install(pkg) { msg ->
+                        lines.add(msg)
+                        scrollToBottom()
+                    }
+                    busy = false
+                    lines.add(r.message)
+                    lines.add("")
                     scrollToBottom()
                 }
-                busy = false
-                lines.add(r.message)
-                lines.add("")
-                scrollToBottom()
+                return
             }
-            return
-        }
-        if (runBuiltin(cmd)) {
-            scrollToBottom()
-            return
+            if (runBuiltin(cmd)) {
+                scrollToBottom()
+                return
+            }
         }
 
         val s = session ?: linuxManager.startSession().also { session = it }
         busy = true
         scope.launch {
-            // Stream linha a linha para a UI (Main thread)
             s.execute(cmd) { line ->
-                scope.launch(Dispatchers.Main.immediate) {
+                scope.launch(Dispatchers.Main) {
                     lines.add(line)
                     scrollToBottom()
                 }
@@ -467,6 +507,19 @@ fun TerminalApp() {
                     .padding(horizontal = 8.dp, vertical = 2.dp),
             )
             Text(
+                text = "Run",
+                color = if (busy || input.isBlank()) Color(0xFF484F58) else Color(0xFF3FB950),
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .clickable(enabled = !busy && input.isNotBlank()) {
+                        val cmd = input.trimEnd()
+                        input = ""
+                        run(cmd)
+                    }
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+            Text(
                 text = when {
                     busy -> "busy"
                     isReady -> "ready"
@@ -502,8 +555,12 @@ fun TerminalApp() {
         TextField(
             value = input,
             onValueChange = { input = it },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp, max = 140.dp),
             enabled = !busy,
+            singleLine = false,
+            maxLines = 8,
             textStyle = TextStyle(
                 fontFamily = FontFamily.Monospace,
                 fontSize = 13.sp,
@@ -516,21 +573,13 @@ fun TerminalApp() {
                 unfocusedIndicatorColor = Color(0xFF30363D),
                 disabledContainerColor = Color(0xFF0D1117),
             ),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(
-                onSend = {
-                    if (busy) return@KeyboardActions
-                    val cmd = input.trim()
-                    input = ""
-                    run(cmd)
-                },
-            ),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
             placeholder = {
                 Text(
-                    text = prompt(),
+                    text = "${prompt()}  (multi-linha OK → Run)",
                     color = Color(0xFF484F58),
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                 )
             },
         )
