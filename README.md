@@ -1,12 +1,12 @@
-# MiniOS
+# NoskOS
 
 Desktop estilo PC num APK Android.
 
 | | |
 |---|---|
 | **Package** | `com.minios.elizierdias` |
-| **Debug** | `com.minios.elizierdias.debug` |
-| **Versão** | 0.1.0 |
+| **Nome visível** | NoskOS |
+| **Versão** | 0.4.0 |
 | **Licença** | **Proprietária — All Rights Reserved** |
 
 > **Aviso legal:** Este projeto é software proprietário.  
@@ -22,7 +22,7 @@ Desktop estilo PC num APK Android.
 - Taskbar + Start Menu
 - **Files** com acesso ao armazenamento do telefone
 - Terminal, Settings, Software Center
-- Esqueleto do subsistema Linux (em desenvolvimento)
+- Subsistema Linux (PRoot + Debian + TigerVNC) em desenvolvimento
 
 ## Wallpaper de foto
 
@@ -39,7 +39,7 @@ Desktop estilo PC num APK Android.
 
 ## Build
 
-Push na `main` → GitHub Actions → artifact `MiniOS-debug.apk`
+Push na `main` → GitHub Actions → artifact `NoskOS-debug.apk`
 
 ## Licença
 
