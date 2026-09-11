@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2026 Elizier Layerti Gungui Dias
- * MiniOS - Desktop-style environment for Android
+ * NoskOS - Desktop-style environment for Android
  *
  * PROPRIETARY SOFTWARE — All Rights Reserved.
  */
@@ -49,7 +49,9 @@ import com.minios.elizierdias.linux.LinuxConfig
 import com.minios.elizierdias.linux.LinuxManager
 import com.minios.elizierdias.linux.LinuxRootFs
 import com.minios.elizierdias.linux.LinuxSession
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun TerminalApp() {
@@ -70,7 +72,7 @@ fun TerminalApp() {
 
     val lines = remember {
         mutableStateListOf(
-            "MiniOS Linux Terminal",
+            "NoskOS Linux Terminal",
             "Debian ARM64 via PRoot (sem root)",
             "",
         )
@@ -86,7 +88,7 @@ fun TerminalApp() {
             promptCwd.startsWith("/root/") -> "~" + promptCwd.removePrefix("/root")
             else -> promptCwd
         }
-        return "root@minios-linux:$short#"
+        return "root@noskos-linux:$short#"
     }
 
     fun scrollToBottom() {
@@ -95,9 +97,14 @@ fun TerminalApp() {
         }
     }
 
+    fun addLine(line: String) {
+        lines.add(line)
+        scrollToBottom()
+    }
+
     fun copyAll() {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("MiniOS Terminal", fullText))
+        cm.setPrimaryClip(ClipData.newPlainText("NoskOS Terminal", fullText))
         Toast.makeText(context, "Terminal copiado (${lines.size} linhas)", Toast.LENGTH_SHORT).show()
     }
 
@@ -417,12 +424,15 @@ fun TerminalApp() {
         val s = session ?: linuxManager.startSession().also { session = it }
         busy = true
         scope.launch {
-            val out = s.execute(cmd)
+            // Stream linha a linha para a UI (Main thread)
+            s.execute(cmd) { line ->
+                scope.launch(Dispatchers.Main.immediate) {
+                    lines.add(line)
+                    scrollToBottom()
+                }
+            }
             busy = false
             promptCwd = s.cwd
-            if (out.isNotBlank()) {
-                out.lines().forEach { lines.add(it) }
-            }
             lines.add("")
             scrollToBottom()
         }
