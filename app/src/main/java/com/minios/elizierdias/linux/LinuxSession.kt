@@ -15,7 +15,6 @@ import kotlinx.coroutines.withContext
 
 /**
  * Sessão de shell Linux no Terminal.
- * Cada comando corre via proot+bash -c, com cwd/env persistentes.
  * Output pode ser streamado linha a linha (apt/wget progress).
  */
 class LinuxSession(
@@ -60,10 +59,6 @@ class LinuxSession(
         return if (longJob) 2_400L else 180L
     }
 
-    /**
-     * @param onLine chamado em tempo real por cada linha de stdout/stderr (thread de IO).
-     * O Terminal deve reencaminhar para a Main thread ao actualizar a UI.
-     */
     suspend fun execute(
         command: String,
         onLine: ((String) -> Unit)? = null,
@@ -98,10 +93,12 @@ class LinuxSession(
             append("cd ")
             append(shellQuote(cwd))
             append(" && ")
-            // Forçar linha a linha em ferramentas comuns de progresso
-            append("stdbuf -oL -eL ")
-            append(trimmed)
-            append(" 2>&1")
+            // stdbuf pode não existir — fallback sem ele
+            append("(command -v stdbuf >/dev/null 2>&1 && stdbuf -oL -eL ")
+            append(shellQuote(trimmed))
+            append(" || ")
+            append(shellQuote(trimmed))
+            append(") 2>&1")
         }
 
         val timeout = timeoutFor(trimmed)
@@ -125,7 +122,6 @@ class LinuxSession(
         }
 
         val exec = result.getOrThrow()
-        // Se já streamou, não duplicar tudo no return — só resumo se vazio
         if (onLine == null) {
             if (exec.stdout.isNotBlank()) {
                 exec.stdout.lines().forEach { lines.add(it) }
@@ -143,7 +139,7 @@ class LinuxSession(
         if (exec.exitCode != 0) {
             onLine("[exit ${exec.exitCode}]")
         }
-        exec.stdout // já foi streamado
+        exec.stdout
     }
 
     private suspend fun handleCd(cmd: String): String {
