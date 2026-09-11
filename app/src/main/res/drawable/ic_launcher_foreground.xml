@@ -5,40 +5,37 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Safe-zone centered MiniOS mark (browser + M + cursor) -->
+    <!-- NoskOS — original mark
+         Geometric N integrated with a subtle window frame.
+         Safe zone centered. Dark brand + electric blue accent. -->
 
-    <!-- Soft dark disc behind mark -->
+    <!-- Soft dark disc (depth) -->
     <path
         android:fillColor="#161B22"
-        android:pathData="M54,18c19.9,0 36,16.1 36,36s-16.1,36 -36,36 -36,-16.1 -36,-36 16.1,-36 36,-36z" />
+        android:pathData="M54,20c18.8,0 34,15.2 34,34s-15.2,34 -34,34 -34,-15.2 -34,-34 15.2,-34 34,-34z" />
 
-    <!-- Browser window frame -->
+    <!-- Outer window frame (subtle desktop reference) -->
     <path
-        android:fillColor="#C9D1D9"
-        android:pathData="M30,34h48a4,4 0,0 1,4 4v32a4,4 0,0 1,-4 4H30a4,4 0,0 1,-4 -4V38a4,4 0,0 1,4 -4z" />
+        android:fillColor="#21262D"
+        android:pathData="M32,32h44a4,4 0,0 1,4 4v36a4,4 0,0 1,-4 4H32a4,4 0,0 1,-4 -4V36a4,4 0,0 1,4 -4z" />
 
-    <!-- Title bar -->
-    <path
-        android:fillColor="#0D1117"
-        android:pathData="M30,34h48v8H30z" />
-
-    <!-- Traffic lights -->
-    <path android:fillColor="#FF5F57" android:pathData="M34,38a1.6,1.6 0,1 1,0 0.01z" />
-    <path android:fillColor="#FEBC2E" android:pathData="M39,38a1.6,1.6 0,1 1,0 0.01z" />
-    <path android:fillColor="#28C840" android:pathData="M44,38a1.6,1.6 0,1 1,0 0.01z" />
-
-    <!-- Content area -->
+    <!-- Inner content area -->
     <path
         android:fillColor="#0D1117"
-        android:pathData="M30,42h48v28H30z" />
+        android:pathData="M36,40h36v28H36z" />
 
-    <!-- Letter M -->
+    <!-- Stylized N (bold geometric) -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M38,62V48h3.2l4.3,9.2L49.8,48H53v14h-2.8V52.2L46.2,61h-2.4l-4,-8.8V62H38z" />
+        android:pathData="M42,64V44h4.2l9.6,14.2V44H60v20h-4.2L46.2,49.8V64H42z" />
 
-    <!-- Cursor (blue) -->
+    <!-- Accent bar (electric blue) — top of window -->
     <path
         android:fillColor="#2F81F7"
-        android:pathData="M56,58 L56,70 L59.2,67.2 L61.5,72.2 L63.8,71.2 L61.5,66.2 L65.2,66.2 Z" />
+        android:pathData="M32,32h44v3H32z" />
+
+    <!-- Small accent dot (living mark) -->
+    <path
+        android:fillColor="#2F81F7"
+        android:pathData="M66,48a2.2,2.2 0,1 1,0 0.01z" />
 </vector>
