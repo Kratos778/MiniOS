@@ -50,10 +50,9 @@ import kotlinx.coroutines.launch
 /**
  * Janela NoskOS para Linux gráfico.
  *
- * Layout optimizado para espaço:
- *  - VNC parado  → painel de controlo expandido
- *  - VNC activo  → barra fina + Viewer ocupa quase tudo
- *  - Botão ⚙ abre/fecha o painel completo
+ * - Barra fina sempre visível
+ * - Painel de controlo (expandível): VNC + lançar apps
+ * - Viewer: ecrã Linux (RFB em breve)
  */
 @Composable
 fun LinuxDesktopApp() {
@@ -68,11 +67,22 @@ fun LinuxDesktopApp() {
     var busy by remember { mutableStateOf(false) }
     var running by remember { mutableStateOf(false) }
     var geometry by remember { mutableStateOf(gui.deviceGeometry()) }
-    // Painel expandido por defeito só quando parado
     var panelExpanded by remember { mutableStateOf(true) }
 
     fun append(msg: String) {
         log = (log + msg.trimEnd() + "\n").takeLast(4000)
+    }
+
+    fun runBusy(block: suspend () -> Unit) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            try {
+                block()
+            } finally {
+                busy = false
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -82,9 +92,9 @@ fun LinuxDesktopApp() {
         panelExpanded = !st.running
         append("[GUI] geometria: $geometry")
         append("[GUI] ${st.message}")
+        append("[GUI] Dados persistentes: /sdcard/MiniOS/{Documents,Downloads,Games}")
     }
 
-    // Quando arranca com sucesso, colapsa o painel automaticamente
     LaunchedEffect(running) {
         if (running) panelExpanded = false
     }
@@ -94,7 +104,6 @@ fun LinuxDesktopApp() {
             .fillMaxSize()
             .background(Color(0xFF0D1117)),
     ) {
-        // ── Barra fina sempre visível ───────────────────────────────────
         ThinBar(
             running = running,
             port = gui.vncPort,
@@ -103,29 +112,31 @@ fun LinuxDesktopApp() {
             onToggle = { panelExpanded = !panelExpanded },
         )
 
-        // ── Painel completo (só quando expandido) ───────────────────────
         if (panelExpanded) {
             ControlPanel(
                 busy = busy,
+                running = running,
                 log = log,
                 onInstall = {
-                    if (busy) return@ControlPanel
-                    busy = true
-                    scope.launch {
+                    runBusy {
                         append("[GUI] A instalar pacotes VNC...")
                         val r = gui.ensureGuiPackages { msg -> append(msg) }
-                        busy = false
+                        if (r.isSuccess) append(r.getOrNull() ?: "OK")
+                        else append("[ERROR] ${r.exceptionOrNull()?.message}")
+                    }
+                },
+                onInstallBrowser = {
+                    runBusy {
+                        append("[GUI] A instalar Falkon (browser leve)...")
+                        val r = gui.ensureLightBrowser { msg -> append(msg) }
                         if (r.isSuccess) append(r.getOrNull() ?: "OK")
                         else append("[ERROR] ${r.exceptionOrNull()?.message}")
                     }
                 },
                 onStart = {
-                    if (busy) return@ControlPanel
-                    busy = true
-                    scope.launch {
+                    runBusy {
                         append("[GUI] A iniciar VNC $geometry...")
                         val r = gui.start(geometry)
-                        busy = false
                         if (r.isSuccess) {
                             running = true
                             append(r.getOrNull()?.message ?: "OK")
@@ -136,31 +147,42 @@ fun LinuxDesktopApp() {
                     }
                 },
                 onStop = {
-                    if (busy) return@ControlPanel
-                    busy = true
-                    scope.launch {
+                    runBusy {
                         val r = gui.stop()
-                        busy = false
                         running = false
                         panelExpanded = true
                         append(r.getOrNull() ?: r.exceptionOrNull()?.message ?: "parado")
                     }
                 },
                 onStatus = {
-                    if (busy) return@ControlPanel
-                    busy = true
-                    scope.launch {
+                    runBusy {
                         val st = gui.status()
-                        busy = false
                         running = st.running
                         geometry = st.geometry
                         append("[GUI] ${st.message}")
                     }
                 },
+                onLaunchTerminal = {
+                    runBusy {
+                        val r = gui.runApp("xterm -geometry 100x30 -ls -title 'NoskOS Terminal'")
+                        if (r.isSuccess) append(r.getOrNull() ?: "OK")
+                        else append("[ERROR] ${r.exceptionOrNull()?.message}")
+                    }
+                },
+                onLaunchBrowser = {
+                    runBusy {
+                        // Preferir Falkon; fallback chromium com flags leves
+                        val r = gui.runApp(
+                            "sh -c 'command -v falkon >/dev/null && exec falkon || " +
+                                "exec chromium --no-sandbox --disable-gpu --disable-software-rasterizer'",
+                        )
+                        if (r.isSuccess) append(r.getOrNull() ?: "OK")
+                        else append("[ERROR] ${r.exceptionOrNull()?.message}")
+                    }
+                },
             )
         }
 
-        // ── Viewer (ocupa o resto) ──────────────────────────────────────
         Viewer(
             running = running,
             port = gui.vncPort,
@@ -172,7 +194,6 @@ fun LinuxDesktopApp() {
     }
 }
 
-/** Barra fina no topo — sempre visível, ~28dp. */
 @Composable
 private fun ThinBar(
     running: Boolean,
@@ -215,15 +236,18 @@ private fun ThinBar(
     }
 }
 
-/** Painel de controlo completo (aparece só quando expandido). */
 @Composable
 private fun ControlPanel(
     busy: Boolean,
+    running: Boolean,
     log: String,
     onInstall: () -> Unit,
+    onInstallBrowser: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onStatus: () -> Unit,
+    onLaunchTerminal: () -> Unit,
+    onLaunchBrowser: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -231,6 +255,7 @@ private fun ControlPanel(
             .background(Color(0xFF161B22))
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
+        // VNC
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth(),
@@ -241,6 +266,26 @@ private fun ControlPanel(
             SmallBtn("Status", Color(0xFF30363D), busy, onStatus)
         }
 
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Apps Linux (só úteis com VNC activo)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            SmallBtn("Terminal", Color(0xFF238636), busy || !running, onLaunchTerminal)
+            SmallBtn("Browser", Color(0xFF1F6FEB), busy || !running, onLaunchBrowser)
+            SmallBtn("+Falkon", Color(0xFF6E40C9), busy, onInstallBrowser)
+        }
+
+        Text(
+            text = "Dados: /sdcard/MiniOS/{Documents,Downloads,Games}",
+            color = Color(0xFF484F58),
+            fontSize = 9.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+
         if (log.isNotBlank()) {
             Spacer(modifier = Modifier.height(6.dp))
             Text(
@@ -250,7 +295,7 @@ private fun ControlPanel(
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp)
+                    .height(56.dp)
                     .verticalScroll(rememberScrollState())
                     .background(Color(0xFF0D1117), RoundedCornerShape(4.dp))
                     .padding(6.dp),
@@ -280,10 +325,6 @@ private fun SmallBtn(
     }
 }
 
-/**
- * Viewer — área principal do ecrã Linux.
- * Quando VNC está activo ocupa quase toda a janela.
- */
 @Composable
 private fun Viewer(
     running: Boolean,
@@ -320,7 +361,7 @@ private fun Viewer(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "Ecrã Linux aparece aqui\n\n1. ⚙ Controlo → Pacotes\n2. Iniciar VNC\n3. O desktop entra neste Viewer",
+                    text = "Ecrã Linux aparece aqui\n\n1. Pacotes → Iniciar\n2. Terminal / Browser\n3. Dados em /sdcard/MiniOS/",
                     color = Color(0xFF8B949E),
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
@@ -329,9 +370,8 @@ private fun Viewer(
                 )
             }
         } else {
-            // Placeholder enquanto não há decoder RFB
             Text(
-                text = "VNC :$port · $geometry\n\nDecoder RFB em breve…",
+                text = "VNC :$port · $geometry\n\nDecoder RFB em breve…\nUsa Terminal/Browser no painel ⚙",
                 color = Color(0xFF484F58),
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace,
