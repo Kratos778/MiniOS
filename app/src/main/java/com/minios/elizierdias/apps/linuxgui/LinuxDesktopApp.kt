@@ -9,6 +9,7 @@ package com.minios.elizierdias.apps.linuxgui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -48,14 +50,10 @@ import kotlinx.coroutines.launch
 /**
  * Janela NoskOS para Linux gráfico.
  *
- * Layout:
- *  ┌─────────────────────────────┐
- *  │  Painel de Controlo         │  ← botões + status + log curto
- *  ├─────────────────────────────┤
- *  │                             │
- *  │         Viewer              │  ← ecrã Linux (RFB) entra aqui
- *  │                             │
- *  └─────────────────────────────┘
+ * Layout optimizado para espaço:
+ *  - VNC parado  → painel de controlo expandido
+ *  - VNC activo  → barra fina + Viewer ocupa quase tudo
+ *  - Botão ⚙ abre/fecha o painel completo
  */
 @Composable
 fun LinuxDesktopApp() {
@@ -70,7 +68,8 @@ fun LinuxDesktopApp() {
     var busy by remember { mutableStateOf(false) }
     var running by remember { mutableStateOf(false) }
     var geometry by remember { mutableStateOf(gui.deviceGeometry()) }
-    var showLog by remember { mutableStateOf(false) }
+    // Painel expandido por defeito só quando parado
+    var panelExpanded by remember { mutableStateOf(true) }
 
     fun append(msg: String) {
         log = (log + msg.trimEnd() + "\n").takeLast(4000)
@@ -80,8 +79,14 @@ fun LinuxDesktopApp() {
         geometry = gui.deviceGeometry()
         val st = gui.status()
         running = st.running
+        panelExpanded = !st.running
         append("[GUI] geometria: $geometry")
         append("[GUI] ${st.message}")
+    }
+
+    // Quando arranca com sucesso, colapsa o painel automaticamente
+    LaunchedEffect(running) {
+        if (running) panelExpanded = false
     }
 
     Column(
@@ -89,66 +94,73 @@ fun LinuxDesktopApp() {
             .fillMaxSize()
             .background(Color(0xFF0D1117)),
     ) {
-        // ── Painel de Controlo ──────────────────────────────────────────
-        ControlPanel(
+        // ── Barra fina sempre visível ───────────────────────────────────
+        ThinBar(
             running = running,
-            geometry = geometry,
             port = gui.vncPort,
-            busy = busy,
-            showLog = showLog,
-            log = log,
-            onToggleLog = { showLog = !showLog },
-            onInstall = {
-                if (busy) return@ControlPanel
-                busy = true
-                scope.launch {
-                    append("[GUI] A instalar pacotes VNC...")
-                    val r = gui.ensureGuiPackages { msg -> append(msg) }
-                    busy = false
-                    if (r.isSuccess) append(r.getOrNull() ?: "OK")
-                    else append("[ERROR] ${r.exceptionOrNull()?.message}")
-                }
-            },
-            onStart = {
-                if (busy) return@ControlPanel
-                busy = true
-                scope.launch {
-                    append("[GUI] A iniciar VNC $geometry...")
-                    val r = gui.start(geometry)
-                    busy = false
-                    if (r.isSuccess) {
-                        running = true
-                        append(r.getOrNull()?.message ?: "OK")
-                        append("[GUI] Sessão pronta · porta ${gui.vncPort}")
-                    } else {
-                        append("[ERROR] ${r.exceptionOrNull()?.message}")
-                    }
-                }
-            },
-            onStop = {
-                if (busy) return@ControlPanel
-                busy = true
-                scope.launch {
-                    val r = gui.stop()
-                    busy = false
-                    running = false
-                    append(r.getOrNull() ?: r.exceptionOrNull()?.message ?: "parado")
-                }
-            },
-            onStatus = {
-                if (busy) return@ControlPanel
-                busy = true
-                scope.launch {
-                    val st = gui.status()
-                    busy = false
-                    running = st.running
-                    geometry = st.geometry
-                    append("[GUI] ${st.message}")
-                }
-            },
+            geometry = geometry,
+            expanded = panelExpanded,
+            onToggle = { panelExpanded = !panelExpanded },
         )
 
-        // ── Viewer ──────────────────────────────────────────────────────
+        // ── Painel completo (só quando expandido) ───────────────────────
+        if (panelExpanded) {
+            ControlPanel(
+                busy = busy,
+                log = log,
+                onInstall = {
+                    if (busy) return@ControlPanel
+                    busy = true
+                    scope.launch {
+                        append("[GUI] A instalar pacotes VNC...")
+                        val r = gui.ensureGuiPackages { msg -> append(msg) }
+                        busy = false
+                        if (r.isSuccess) append(r.getOrNull() ?: "OK")
+                        else append("[ERROR] ${r.exceptionOrNull()?.message}")
+                    }
+                },
+                onStart = {
+                    if (busy) return@ControlPanel
+                    busy = true
+                    scope.launch {
+                        append("[GUI] A iniciar VNC $geometry...")
+                        val r = gui.start(geometry)
+                        busy = false
+                        if (r.isSuccess) {
+                            running = true
+                            append(r.getOrNull()?.message ?: "OK")
+                            append("[GUI] Sessão pronta · porta ${gui.vncPort}")
+                        } else {
+                            append("[ERROR] ${r.exceptionOrNull()?.message}")
+                        }
+                    }
+                },
+                onStop = {
+                    if (busy) return@ControlPanel
+                    busy = true
+                    scope.launch {
+                        val r = gui.stop()
+                        busy = false
+                        running = false
+                        panelExpanded = true
+                        append(r.getOrNull() ?: r.exceptionOrNull()?.message ?: "parado")
+                    }
+                },
+                onStatus = {
+                    if (busy) return@ControlPanel
+                    busy = true
+                    scope.launch {
+                        val st = gui.status()
+                        busy = false
+                        running = st.running
+                        geometry = st.geometry
+                        append("[GUI] ${st.message}")
+                    }
+                },
+            )
+        }
+
+        // ── Viewer (ocupa o resto) ──────────────────────────────────────
         Viewer(
             running = running,
             port = gui.vncPort,
@@ -160,16 +172,54 @@ fun LinuxDesktopApp() {
     }
 }
 
-/** Painel de controlo (topo da janela). */
+/** Barra fina no topo — sempre visível, ~28dp. */
+@Composable
+private fun ThinBar(
+    running: Boolean,
+    port: Int,
+    geometry: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(28.dp)
+            .background(Color(0xFF161B22))
+            .padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = if (running) "● $port" else "○ parado",
+                color = if (running) Color(0xFF3FB950) else Color(0xFF8B949E),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = geometry,
+                color = Color(0xFF58A6FF),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        Text(
+            text = if (expanded) "▲ Controlo" else "⚙ Controlo",
+            color = Color(0xFFC9D1D9),
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.clickable(onClick = onToggle),
+        )
+    }
+}
+
+/** Painel de controlo completo (aparece só quando expandido). */
 @Composable
 private fun ControlPanel(
-    running: Boolean,
-    geometry: String,
-    port: Int,
     busy: Boolean,
-    showLog: Boolean,
     log: String,
-    onToggleLog: () -> Unit,
     onInstall: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
@@ -179,32 +229,8 @@ private fun ControlPanel(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF161B22))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
-        // Status line
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = if (running) "● ATIVO  :$port" else "○ parado",
-                color = if (running) Color(0xFF3FB950) else Color(0xFF8B949E),
-                fontSize = 13.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Medium,
-            )
-            Text(
-                text = geometry,
-                color = Color(0xFF58A6FF),
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace,
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Botões
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth(),
@@ -213,11 +239,9 @@ private fun ControlPanel(
             SmallBtn("Iniciar", Color(0xFF238636), busy, onStart)
             SmallBtn("Parar", Color(0xFFDA3633), busy, onStop)
             SmallBtn("Status", Color(0xFF30363D), busy, onStatus)
-            SmallBtn(if (showLog) "Log ▲" else "Log ▼", Color(0xFF21262D), false, onToggleLog)
         }
 
-        // Log (opcional, compacto)
-        if (showLog && log.isNotBlank()) {
+        if (log.isNotBlank()) {
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = log,
@@ -226,7 +250,7 @@ private fun ControlPanel(
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(72.dp)
+                    .height(64.dp)
                     .verticalScroll(rememberScrollState())
                     .background(Color(0xFF0D1117), RoundedCornerShape(4.dp))
                     .padding(6.dp),
@@ -246,17 +270,19 @@ private fun SmallBtn(
         onClick = onClick,
         enabled = !busy,
         colors = ButtonDefaults.buttonColors(containerColor = color),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-        modifier = Modifier.height(32.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            horizontal = 10.dp,
+            vertical = 4.dp,
+        ),
+        modifier = Modifier.height(30.dp),
     ) {
         Text(label, fontSize = 11.sp)
     }
 }
 
 /**
- * Viewer — área onde o framebuffer Linux (RFB) será desenhado.
- * Por agora: placeholder visual + estado da sessão.
- * Próximo passo: decoder RFB → Bitmap → ImageBitmap aqui.
+ * Viewer — área principal do ecrã Linux.
+ * Quando VNC está activo ocupa quase toda a janela.
  */
 @Composable
 private fun Viewer(
@@ -267,31 +293,46 @@ private fun Viewer(
 ) {
     Box(
         modifier = modifier
-            .padding(8.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(Color(0xFF010409))
-            .border(1.dp, Color(0xFF21262D), RoundedCornerShape(6.dp)),
+            .padding(if (running) 0.dp else 6.dp)
+            .then(
+                if (!running) {
+                    Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .border(1.dp, Color(0xFF21262D), RoundedCornerShape(6.dp))
+                } else {
+                    Modifier
+                },
+            )
+            .background(Color(0xFF010409)),
         contentAlignment = Alignment.Center,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.padding(16.dp),
-        ) {
+        if (!running) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.padding(12.dp),
+            ) {
+                Text(
+                    text = "Viewer",
+                    color = Color(0xFF58A6FF),
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "Ecrã Linux aparece aqui\n\n1. ⚙ Controlo → Pacotes\n2. Iniciar VNC\n3. O desktop entra neste Viewer",
+                    color = Color(0xFF8B949E),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 16.sp,
+                )
+            }
+        } else {
+            // Placeholder enquanto não há decoder RFB
             Text(
-                text = "Viewer",
-                color = Color(0xFF58A6FF),
-                fontSize = 14.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = if (running) {
-                    "Sessão VNC activa · 127.0.0.1:$port\n$geometry\n\nAguardando decoder RFB nativo…"
-                } else {
-                    "Ecrã Linux aparece aqui\n\n1. Instala pacotes\n2. Inicia VNC\n3. O desktop Linux entra neste Viewer"
-                },
-                color = Color(0xFF8B949E),
+                text = "VNC :$port · $geometry\n\nDecoder RFB em breve…",
+                color = Color(0xFF484F58),
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace,
                 textAlign = TextAlign.Center,
