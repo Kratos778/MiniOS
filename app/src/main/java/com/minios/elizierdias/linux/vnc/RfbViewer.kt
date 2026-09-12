@@ -8,15 +8,18 @@ package com.minios.elizierdias.linux.vnc
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,9 +49,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
-/**
- * Viewer RFB: toque = rato; teclado do telefone via campo de texto invisível → RFB keysyms.
- */
 @Composable
 fun RfbViewer(
     active: Boolean,
@@ -56,45 +56,32 @@ fun RfbViewer(
     port: Int = 5901,
     modifier: Modifier = Modifier,
 ) {
-    val client = remember { RfbClient(host, port) }
+    val client = remember(host, port) { RfbClient(host, port) }
     var frameId by remember { mutableLongStateOf(0L) }
     var status by remember { mutableStateOf("A ligar…") }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
+    var showKeys by remember { mutableStateOf(false) }
+    var gamerMode by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     var imeText by remember { mutableStateOf("") }
 
-    fun sendChar(ch: Char) {
+    fun tapKey(keysym: Int) {
         if (client.state != RfbClient.State.CONNECTED) return
+        client.sendKeyEvent(keysym, true)
+        client.sendKeyEvent(keysym, false)
+    }
+
+    fun sendChar(ch: Char) {
         when (ch) {
-            '\n' -> {
-                client.sendKeyEvent(0xff0d, true)
-                client.sendKeyEvent(0xff0d, false)
-            }
-            '\b' -> {
-                client.sendKeyEvent(0xff08, true)
-                client.sendKeyEvent(0xff08, false)
-            }
+            '\n' -> tapKey(0xff0d)
             else -> {
                 val code = ch.code
-                if (code in 0x20..0xFF) {
-                    client.sendKeyEvent(code, true)
-                    client.sendKeyEvent(code, false)
-                }
+                if (code in 0x20..0xFF) tapKey(code)
             }
         }
     }
 
-    fun sendBackspace() {
-        client.sendKeyEvent(0xff08, true)
-        client.sendKeyEvent(0xff08, false)
-    }
-
-    fun sendEnter() {
-        client.sendKeyEvent(0xff0d, true)
-        client.sendKeyEvent(0xff0d, false)
-    }
-
-    DisposableEffect(Unit) {
+    DisposableEffect(client) {
         client.onFrame = { frameId = client.frameId() }
         client.onState = { st, msg ->
             status = when (st) {
@@ -165,12 +152,6 @@ fun RfbViewer(
                                 client.sendPointerEvent(fx, fy, 0)
                             }
                         },
-                        onDoubleTap = {
-                            try {
-                                focusRequester.requestFocus()
-                            } catch (_: Exception) {
-                            }
-                        },
                     )
                 }
                 .pointerInput(active, client.fbWidth, client.fbHeight) {
@@ -211,7 +192,7 @@ fun RfbViewer(
         ) {
             val bmp = client.currentBitmap()
             @Suppress("UNUSED_VARIABLE")
-            val frameTick = frameId
+            val tick = frameId
             if (active && bmp != null && !bmp.isRecycled &&
                 client.state == RfbClient.State.CONNECTED
             ) {
@@ -233,67 +214,154 @@ fun RfbViewer(
             }
         }
 
-        // Campo invisível para o teclado do telefone (IME)
+        // IME invisível
         if (active) {
             BasicTextField(
                 value = imeText,
                 onValueChange = { new ->
-                    when {
-                        new.length > imeText.length -> {
-                            val added = new.substring(imeText.length)
-                            added.forEach { sendChar(it) }
-                            imeText = ""
-                        }
-                        new.length < imeText.length -> {
-                            // backspace(s)
-                            repeat(imeText.length - new.length) { sendBackspace() }
-                            imeText = ""
-                        }
-                        else -> imeText = ""
+                    if (new.length > imeText.length) {
+                        new.substring(imeText.length).forEach { sendChar(it) }
+                    } else if (new.length < imeText.length) {
+                        repeat(imeText.length - new.length) { tapKey(0xff08) }
                     }
+                    imeText = ""
                 },
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .focusRequester(focusRequester)
-                    .focusable(),
+                    .align(Alignment.BottomStart)
+                    .padding(0.dp)
+                    .focusRequester(focusRequester),
                 textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
                 cursorBrush = SolidColor(Color.Transparent),
-                singleLine = false,
             )
         }
 
         if (active) {
-            Row(
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(8.dp),
+                    .padding(6.dp),
+                horizontalAlignment = Alignment.End,
             ) {
-                Text(
-                    text = "⌨ Teclado",
-                    color = Color(0xFF58A6FF),
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier
-                        .background(Color(0xCC161B22))
-                        .clickable {
-                            try {
-                                focusRequester.requestFocus()
-                            } catch (_: Exception) {
-                            }
+                if (showKeys) {
+                    SpecialKeysPanel(
+                        gamerMode = gamerMode,
+                        onKey = { tapKey(it) },
+                        onToggleGamer = { gamerMode = !gamerMode },
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TinyBtn("⌨") {
+                        try {
+                            focusRequester.requestFocus()
+                        } catch (_: Exception) {
                         }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    }
+                    TinyBtn("⏎") { tapKey(0xff0d) }
+                    TinyBtn(if (showKeys) "▾" else "⌨+") { showKeys = !showKeys }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TinyBtn(label: String, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = Color(0xFFC9D1D9),
+        fontSize = 11.sp,
+        fontFamily = FontFamily.Monospace,
+        modifier = Modifier
+            .background(Color(0xCC161B22), RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+    )
+}
+
+@Composable
+private fun SpecialKeysPanel(
+    gamerMode: Boolean,
+    onKey: (Int) -> Unit,
+    onToggleGamer: () -> Unit,
+) {
+    val scroll = rememberScrollState()
+    Column(
+        modifier = Modifier
+            .padding(bottom = 4.dp)
+            .background(Color(0xE0161B22), RoundedCornerShape(6.dp))
+            .padding(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = if (gamerMode) "Gamer HUD" else "Teclas",
+                color = Color(0xFF58A6FF),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+            )
+            Text(
+                text = if (gamerMode) "Normal" else "Gamer",
+                color = Color(0xFF3FB950),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.clickable(onClick = onToggleGamer),
+            )
+        }
+        Row(
+            modifier = Modifier
+                .horizontalScroll(scroll)
+                .padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            val keys = if (gamerMode) {
+                listOf(
+                    "Tab" to 0xff09,
+                    "Esc" to 0xff1b,
+                    "↑" to 0xff52,
+                    "↓" to 0xff54,
+                    "←" to 0xff51,
+                    "→" to 0xff53,
+                    "Ctrl" to 0xffe3,
+                    "Alt" to 0xffe9,
+                    "Space" to 0x20,
                 )
+            } else {
+                listOf(
+                    "Tab" to 0xff09,
+                    "Esc" to 0xff1b,
+                    "⇧" to 0xffe1,
+                    "Ctrl" to 0xffe3,
+                    "Alt" to 0xffe9,
+                    "↑" to 0xff52,
+                    "↓" to 0xff54,
+                    "←" to 0xff51,
+                    "→" to 0xff53,
+                    "F1" to 0xffbe,
+                    "F2" to 0xffbf,
+                    "F3" to 0xffc0,
+                    "F4" to 0xffc1,
+                    "F5" to 0xffc2,
+                    "F6" to 0xffc3,
+                    "F7" to 0xffc4,
+                    "F8" to 0xffc5,
+                    "F9" to 0xffc6,
+                    "F10" to 0xffc7,
+                    "F11" to 0xffc8,
+                    "F12" to 0xffc9,
+                )
+            }
+            keys.forEach { (label, sym) ->
                 Text(
-                    text = " ⏎ ",
-                    color = Color(0xFF3FB950),
-                    fontSize = 12.sp,
+                    text = label,
+                    color = Color(0xFFE6EDF3),
+                    fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier
-                        .background(Color(0xCC161B22))
-                        .clickable { sendEnter() }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        .background(Color(0xFF21262D), RoundedCornerShape(3.dp))
+                        .clickable { onKey(sym) }
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
                 )
             }
         }
