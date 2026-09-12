@@ -16,13 +16,7 @@ import java.io.File
 
 /**
  * Arranca / para sessão gráfica TigerVNC dentro do Debian PRoot.
- * Geometria = resolução do ecrã do dispositivo (telefone/tablet).
- *
- * Fluxo:
- * 1. ensureGuiPackages()  → tigervnc + openbox + xterm (+ browser leve opcional)
- * 2. start()              → sobe Xvnc + openbox
- * 3. runApp()             → lança apps no DISPLAY=:1 (Chrome leve, jogos, etc.)
- * 4. Cliente VNC nativo   → mostra o ecrã no Viewer (próximo passo)
+ * Cliente RFB nativo no Viewer (sem AVNC).
  */
 class LinuxGuiRuntime(
     private val context: Context,
@@ -76,7 +70,6 @@ class LinuxGuiRuntime(
                 "unset DBUS_SESSION_BUS_ADDRESS\n" +
                 "[ -r $homeRef/.Xresources ] && xrdb $homeRef/.Xresources\n" +
                 "export DISPLAY=$displayName\n" +
-                "# Pastas persistentes no sdcard\n" +
                 "mkdir -p /sdcard/MiniOS/Documents /sdcard/MiniOS/Downloads /sdcard/MiniOS/Games 2>/dev/null\n" +
                 "mkdir -p $homeRef/Documents $homeRef/Downloads $homeRef/Desktop 2>/dev/null\n" +
                 "if command -v openbox >/dev/null 2>&1; then\n" +
@@ -93,7 +86,6 @@ class LinuxGuiRuntime(
         return passwd.absolutePath
     }
 
-    /** Cria pastas públicas para dados que sobrevivem à desinstalação. */
     suspend fun ensurePersistentDirs(): Result<String> = withContext(Dispatchers.IO) {
         try {
             val cmd =
@@ -119,9 +111,16 @@ class LinuxGuiRuntime(
         r.getOrNull()?.stdout?.trim() == "YES"
     }
 
-    /**
-     * Pacotes GUI mínimos + browser leve (Falkon) para ~2GB RAM.
-     */
+    /** Remove locks/pids stale para poder voltar a arrancar. */
+    private suspend fun cleanStaleLocks() {
+        runtime.exec(
+            "rm -f /tmp/.X${displayNum}-lock /tmp/.X11-unix/X${displayNum} " +
+                "/root/.vnc/*.pid /root/.vnc/localhost:${displayNum}.pid 2>/dev/null || true",
+            timeoutSec = 10,
+        )
+        runtime.exec("vncserver -kill $displayName 2>/dev/null || true", timeoutSec = 15)
+    }
+
     suspend fun ensureGuiPackages(onProgress: ((String) -> Unit)? = null): Result<String> =
         withContext(Dispatchers.IO) {
             try {
@@ -182,7 +181,6 @@ class LinuxGuiRuntime(
             }
         }
 
-    /** Instala browser leve (Falkon) — melhor para 2GB RAM que Chrome. */
     suspend fun ensureLightBrowser(onProgress: ((String) -> Unit)? = null): Result<String> =
         withContext(Dispatchers.IO) {
             try {
@@ -230,16 +228,21 @@ class LinuxGuiRuntime(
         }
         val r = runtime.exec("vncserver -list 2>/dev/null || true", timeoutSec = 15)
         val out = r.getOrNull()?.stdout.orEmpty()
-        val running = out.contains(":$displayNum") || out.contains("590$displayNum")
+        // Não contar sessões "stale" (processo morto)
+        val hasStale = out.contains("stale", ignoreCase = true)
+        val hasDisplay = out.contains(":$displayNum") || out.lines().any {
+            it.trim().startsWith("$displayNum") || it.contains(" $displayNum\t")
+        }
+        val running = hasDisplay && !hasStale
         GuiStatus(
             running = running,
             display = displayName,
             port = vncPort,
             geometry = geo,
-            message = if (running) {
-                "VNC ativo em $displayName (porta $vncPort)"
-            } else {
-                "VNC parado"
+            message = when {
+                hasStale -> "VNC stale — usa Iniciar (limpa locks)"
+                running -> "VNC ativo em $displayName (porta $vncPort)"
+                else -> "VNC parado"
             },
         )
     }
@@ -262,10 +265,10 @@ class LinuxGuiRuntime(
                 ensurePersistentDirs()
                 ensureXstartup()
                 ensureVncPasswd()
+                cleanStaleLocks()
                 val geo = geometry ?: deviceGeometry()
 
-                runtime.exec("vncserver -kill $displayName 2>/dev/null || true", timeoutSec = 20)
-
+                // localhost yes: só apps no mesmo dispositivo (cliente RFB do NoskOS)
                 val cmd = buildString {
                     append("export HOME=/root USER=root; ")
                     append("vncserver $displayName ")
@@ -284,10 +287,12 @@ class LinuxGuiRuntime(
                     r.exceptionOrNull()?.let { appendLine(it.message) }
                 }.trim()
 
-                Thread.sleep(800)
+                Thread.sleep(1000)
 
                 val st = status()
-                if (st.running || body.contains("New") || body.contains("desktop is") || body.contains("started")) {
+                if (st.running || body.contains("New") || body.contains("desktop is") ||
+                    body.contains("started") || body.contains("on port")
+                ) {
                     Result.success(
                         st.copy(
                             running = true,
@@ -310,6 +315,7 @@ class LinuxGuiRuntime(
 
     suspend fun stop(): Result<String> = withContext(Dispatchers.IO) {
         try {
+            cleanStaleLocks()
             val r = runtime.exec("vncserver -kill $displayName 2>&1 || true", timeoutSec = 20)
             val body = r.getOrNull()?.stdout.orEmpty() + r.getOrNull()?.stderr.orEmpty()
             Result.success(body.ifBlank { "VNC $displayName parado" })
@@ -318,10 +324,6 @@ class LinuxGuiRuntime(
         }
     }
 
-    /**
-     * Lança uma app no DISPLAY da sessão VNC (background).
-     * Exemplos: "xterm", "falkon", "chromium --no-sandbox"
-     */
     suspend fun runApp(command: String): Result<String> = withContext(Dispatchers.IO) {
         try {
             val st = status()
@@ -334,7 +336,6 @@ class LinuxGuiRuntime(
             if (safe.isEmpty() || safe.length > 300) {
                 return@withContext Result.failure(IllegalStateException("Comando inválido"))
             }
-            // Corre em background dentro do proot
             val cmd =
                 "export DISPLAY=$displayName HOME=/root USER=root; " +
                     "nohup $safe >/tmp/noskos-app.log 2>&1 & echo PID:\${!}"
