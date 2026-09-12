@@ -5,8 +5,6 @@
  */
 package com.minios.elizierdias.linux.vnc
 
-import android.content.Context
-import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,7 +14,10 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -32,15 +33,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
@@ -48,6 +46,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
+/**
+ * Viewer RFB: toque = rato; teclado do telefone via campo de texto invisível → RFB keysyms.
+ */
 @Composable
 fun RfbViewer(
     active: Boolean,
@@ -55,21 +56,42 @@ fun RfbViewer(
     port: Int = 5901,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val view = LocalView.current
     val client = remember { RfbClient(host, port) }
     var frameId by remember { mutableLongStateOf(0L) }
     var status by remember { mutableStateOf("A ligar…") }
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     val focusRequester = remember { FocusRequester() }
+    var imeText by remember { mutableStateOf("") }
 
-    fun showKeyboard() {
-        try {
-            focusRequester.requestFocus()
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            imm?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
-        } catch (_: Exception) {
+    fun sendChar(ch: Char) {
+        if (client.state != RfbClient.State.CONNECTED) return
+        when (ch) {
+            '\n' -> {
+                client.sendKeyEvent(0xff0d, true)
+                client.sendKeyEvent(0xff0d, false)
+            }
+            '\b' -> {
+                client.sendKeyEvent(0xff08, true)
+                client.sendKeyEvent(0xff08, false)
+            }
+            else -> {
+                val code = ch.code
+                if (code in 0x20..0xFF) {
+                    client.sendKeyEvent(code, true)
+                    client.sendKeyEvent(code, false)
+                }
+            }
         }
+    }
+
+    fun sendBackspace() {
+        client.sendKeyEvent(0xff08, true)
+        client.sendKeyEvent(0xff08, false)
+    }
+
+    fun sendEnter() {
+        client.sendKeyEvent(0xff0d, true)
+        client.sendKeyEvent(0xff0d, false)
     }
 
     DisposableEffect(Unit) {
@@ -120,31 +142,6 @@ fun RfbViewer(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .focusRequester(focusRequester)
-                .focusable()
-                .onPreviewKeyEvent { ke ->
-                    if (!active || client.state != RfbClient.State.CONNECTED) {
-                        return@onPreviewKeyEvent false
-                    }
-                    val native = try {
-                        ke.nativeKeyEvent
-                    } catch (_: Exception) {
-                        return@onPreviewKeyEvent false
-                    }
-                    val sym = RfbKeymap.keysym(native)
-                    if (sym == 0) return@onPreviewKeyEvent false
-                    when (ke.type) {
-                        KeyEventType.KeyDown -> {
-                            client.sendKeyEvent(sym, true)
-                            true
-                        }
-                        KeyEventType.KeyUp -> {
-                            client.sendKeyEvent(sym, false)
-                            true
-                        }
-                        else -> false
-                    }
-                }
                 .onSizeChanged { viewSize = it }
                 .pointerInput(active, client.fbWidth, client.fbHeight, viewSize) {
                     if (!active || client.fbWidth <= 0) return@pointerInput
@@ -160,7 +157,6 @@ fun RfbViewer(
                     }
                     detectTapGestures(
                         onPress = { offset ->
-                            focusRequester.requestFocus()
                             val (fx, fy) = toFb(offset.x, offset.y)
                             client.sendPointerEvent(fx, fy, 1)
                             try {
@@ -169,7 +165,12 @@ fun RfbViewer(
                                 client.sendPointerEvent(fx, fy, 0)
                             }
                         },
-                        onDoubleTap = { showKeyboard() },
+                        onDoubleTap = {
+                            try {
+                                focusRequester.requestFocus()
+                            } catch (_: Exception) {
+                            }
+                        },
                     )
                 }
                 .pointerInput(active, client.fbWidth, client.fbHeight) {
@@ -232,6 +233,37 @@ fun RfbViewer(
             }
         }
 
+        // Campo invisível para o teclado do telefone (IME)
+        if (active) {
+            BasicTextField(
+                value = imeText,
+                onValueChange = { new ->
+                    when {
+                        new.length > imeText.length -> {
+                            val added = new.substring(imeText.length)
+                            added.forEach { sendChar(it) }
+                            imeText = ""
+                        }
+                        new.length < imeText.length -> {
+                            // backspace(s)
+                            repeat(imeText.length - new.length) { sendBackspace() }
+                            imeText = ""
+                        }
+                        else -> imeText = ""
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .focusRequester(focusRequester)
+                    .focusable(),
+                textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
+                cursorBrush = SolidColor(Color.Transparent),
+                singleLine = false,
+            )
+        }
+
         if (active) {
             Row(
                 modifier = Modifier
@@ -245,8 +277,23 @@ fun RfbViewer(
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier
                         .background(Color(0xCC161B22))
-                        .clickable { showKeyboard() }
+                        .clickable {
+                            try {
+                                focusRequester.requestFocus()
+                            } catch (_: Exception) {
+                            }
+                        }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
+                )
+                Text(
+                    text = " ⏎ ",
+                    color = Color(0xFF3FB950),
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier
+                        .background(Color(0xCC161B22))
+                        .clickable { sendEnter() }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                 )
             }
         }
