@@ -5,6 +5,7 @@
  */
 package com.minios.elizierdias.linux.vnc
 
+import android.view.KeyCharacterMap
 import android.view.KeyEvent
 
 /**
@@ -13,18 +14,17 @@ import android.view.KeyEvent
 object RfbKeymap {
 
     fun keysym(event: KeyEvent): Int {
-        // Unicode first (letters, digits, punctuation with modifiers)
         val unicode = event.unicodeChar
-        if (unicode != 0 && unicode and KeyEvent.META_UNICODE_CHAR_FLAG.inv() != 0) {
-            val ch = unicode and KeyEvent.META_UNICODE_CHAR_FLAG.inv()
+        if (unicode != 0 && (unicode and KeyCharacterMap.COMBINING_ACCENT) == 0) {
+            val ch = unicode and 0xFFFF
             if (ch in 0x20..0x7E) return ch
-            if (ch > 0x7E) return ch // Latin-1 / BMP subset
+            if (ch in 0xA0..0xFF) return ch
         }
 
         return when (event.keyCode) {
-            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> 0xff0d // Return
-            KeyEvent.KEYCODE_DEL -> 0xff08 // BackSpace
-            KeyEvent.KEYCODE_FORWARD_DEL -> 0xffff // Delete
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> 0xff0d
+            KeyEvent.KEYCODE_DEL -> 0xff08
+            KeyEvent.KEYCODE_FORWARD_DEL -> 0xffff
             KeyEvent.KEYCODE_TAB -> 0xff09
             KeyEvent.KEYCODE_ESCAPE -> 0xff1b
             KeyEvent.KEYCODE_SPACE -> 0x20
@@ -32,8 +32,8 @@ object RfbKeymap {
             KeyEvent.KEYCODE_DPAD_UP -> 0xff52
             KeyEvent.KEYCODE_DPAD_RIGHT -> 0xff53
             KeyEvent.KEYCODE_DPAD_DOWN -> 0xff54
-            KeyEvent.KEYCODE_MOVE_HOME, KeyEvent.KEYCODE_HOME -> 0xff50 // Home
-            KeyEvent.KEYCODE_MOVE_END -> 0xff57 // End
+            KeyEvent.KEYCODE_MOVE_HOME -> 0xff50
+            KeyEvent.KEYCODE_MOVE_END -> 0xff57
             KeyEvent.KEYCODE_PAGE_UP -> 0xff55
             KeyEvent.KEYCODE_PAGE_DOWN -> 0xff56
             KeyEvent.KEYCODE_INSERT -> 0xff63
