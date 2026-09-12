@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.minios.elizierdias.linux.LinuxGuiRuntime
 import com.minios.elizierdias.linux.LinuxManager
+import com.minios.elizierdias.linux.vnc.RfbViewer
 import kotlinx.coroutines.launch
 
 /**
@@ -52,7 +53,7 @@ import kotlinx.coroutines.launch
  *
  * - Barra fina sempre visível
  * - Painel de controlo (expandível): VNC + lançar apps
- * - Viewer: ecrã Linux (RFB em breve)
+ * - Viewer: cliente RFB nativo → ecrã Linux dentro do NoskOS (sem AVNC)
  */
 @Composable
 fun LinuxDesktopApp() {
@@ -92,7 +93,8 @@ fun LinuxDesktopApp() {
         panelExpanded = !st.running
         append("[GUI] geometria: $geometry")
         append("[GUI] ${st.message}")
-        append("[GUI] Dados persistentes: /sdcard/MiniOS/{Documents,Downloads,Games}")
+        append("[GUI] Viewer RFB nativo (sem AVNC)")
+        append("[GUI] Dados: /sdcard/MiniOS/{Documents,Downloads,Games}")
     }
 
     LaunchedEffect(running) {
@@ -140,7 +142,7 @@ fun LinuxDesktopApp() {
                         if (r.isSuccess) {
                             running = true
                             append(r.getOrNull()?.message ?: "OK")
-                            append("[GUI] Sessão pronta · porta ${gui.vncPort}")
+                            append("[GUI] Viewer a ligar a 127.0.0.1:${gui.vncPort}")
                         } else {
                             append("[ERROR] ${r.exceptionOrNull()?.message}")
                         }
@@ -171,7 +173,6 @@ fun LinuxDesktopApp() {
                 },
                 onLaunchBrowser = {
                     runBusy {
-                        // Preferir Falkon; fallback chromium com flags leves
                         val r = gui.runApp(
                             "sh -c 'command -v falkon >/dev/null && exec falkon || " +
                                 "exec chromium --no-sandbox --disable-gpu --disable-software-rasterizer'",
@@ -183,10 +184,11 @@ fun LinuxDesktopApp() {
             )
         }
 
-        Viewer(
-            running = running,
+        // Viewer RFB nativo — ecrã Linux dentro do NoskOS
+        RfbViewer(
+            active = running,
+            host = "127.0.0.1",
             port = gui.vncPort,
-            geometry = geometry,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
@@ -255,7 +257,6 @@ private fun ControlPanel(
             .background(Color(0xFF161B22))
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
-        // VNC
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth(),
@@ -268,7 +269,6 @@ private fun ControlPanel(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Apps Linux (só úteis com VNC activo)
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.fillMaxWidth(),
@@ -322,62 +322,5 @@ private fun SmallBtn(
         modifier = Modifier.height(30.dp),
     ) {
         Text(label, fontSize = 11.sp)
-    }
-}
-
-@Composable
-private fun Viewer(
-    running: Boolean,
-    port: Int,
-    geometry: String,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier
-            .padding(if (running) 0.dp else 6.dp)
-            .then(
-                if (!running) {
-                    Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .border(1.dp, Color(0xFF21262D), RoundedCornerShape(6.dp))
-                } else {
-                    Modifier
-                },
-            )
-            .background(Color(0xFF010409)),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (!running) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.padding(12.dp),
-            ) {
-                Text(
-                    text = "Viewer",
-                    color = Color(0xFF58A6FF),
-                    fontSize = 13.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = "Ecrã Linux aparece aqui\n\n1. Pacotes → Iniciar\n2. Terminal / Browser\n3. Dados em /sdcard/MiniOS/",
-                    color = Color(0xFF8B949E),
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 16.sp,
-                )
-            }
-        } else {
-            Text(
-                text = "VNC :$port · $geometry\n\nDecoder RFB em breve…\nUsa Terminal/Browser no painel ⚙",
-                color = Color(0xFF484F58),
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-                textAlign = TextAlign.Center,
-                lineHeight = 18.sp,
-            )
-        }
     }
 }
