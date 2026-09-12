@@ -2,15 +2,10 @@
  * Copyright (c) 2026 Elizier Layerti Gungui Dias
  * NoskOS - Desktop-style environment for Android
  * PROPRIETARY SOFTWARE — All Rights Reserved.
- *
- * Minimal RFB 3.8 client for TigerVNC / Xtigervnc.
- * Security: None (type 1). Encoding: Raw. Pixel: 32bpp LE RGB.
  */
 package com.minios.elizierdias.linux.vnc
 
 import android.graphics.Bitmap
-import android.graphics.Canvas as AndroidCanvas
-import android.graphics.Paint
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.DataInputStream
@@ -19,16 +14,13 @@ import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
 /**
- * Cliente RFB leve para 127.0.0.1:5901 (TigerVNC com -SecurityTypes None).
- *
- * Limitacoes MVP:
- * - So encoding Raw (0)
- * - So security None
- * - Sem Tight/ZRLE/Hextile (pode adicionar depois)
+ * Cliente RFB 3.8 para TigerVNC (-SecurityTypes None).
+ * Encoding: Raw. Crash-safe (sem recycle do bitmap enquanto o Compose desenha).
  */
 class RfbClient(
     private val host: String = "127.0.0.1",
@@ -48,7 +40,8 @@ class RfbClient(
         private set
 
     private val bitmapRef = AtomicReference<Bitmap?>(null)
-    private val frameVersion = AtomicReference(0L)
+    private val frameVersion = AtomicLong(0)
+    private val bmpLock = Any()
 
     fun currentBitmap(): Bitmap? = bitmapRef.get()
     fun frameId(): Long = frameVersion.get()
@@ -67,7 +60,10 @@ class RfbClient(
         disconnect()
         state = State.CONNECTING
         lastError = null
-        onState?.invoke(state, null)
+        try {
+            onState?.invoke(state, null)
+        } catch (_: Exception) {
+        }
         thread(name = "rfb-connect", isDaemon = true) {
             try {
                 val s = Socket()
@@ -80,13 +76,19 @@ class RfbClient(
                 handshake()
                 running.set(true)
                 state = State.CONNECTED
-                onState?.invoke(state, desktopName)
+                try {
+                    onState?.invoke(state, desktopName)
+                } catch (_: Exception) {
+                }
                 startReader()
                 requestFramebufferUpdate(incremental = false)
             } catch (e: Exception) {
                 lastError = e.message ?: e.toString()
                 state = State.ERROR
-                onState?.invoke(state, lastError)
+                try {
+                    onState?.invoke(state, lastError)
+                } catch (_: Exception) {
+                }
                 disconnect()
             }
         }
@@ -94,17 +96,32 @@ class RfbClient(
 
     fun disconnect() {
         running.set(false)
-        try { readerThread?.interrupt() } catch (_: Exception) {}
+        try {
+            readerThread?.interrupt()
+        } catch (_: Exception) {
+        }
         readerThread = null
-        try { input?.close() } catch (_: Exception) {}
-        try { output?.close() } catch (_: Exception) {}
-        try { socket?.close() } catch (_: Exception) {}
+        try {
+            input?.close()
+        } catch (_: Exception) {
+        }
+        try {
+            output?.close()
+        } catch (_: Exception) {
+        }
+        try {
+            socket?.close()
+        } catch (_: Exception) {
+        }
         input = null
         output = null
         socket = null
         if (state != State.ERROR) {
             state = State.DISCONNECTED
-            onState?.invoke(state, null)
+            try {
+                onState?.invoke(state, null)
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -112,46 +129,38 @@ class RfbClient(
         val inp = input ?: throw IOException("no input")
         val out = output ?: throw IOException("no output")
 
-        // ProtocolVersion
         val serverVer = ByteArray(12)
         inp.readFully(serverVer)
-        val verStr = String(serverVer, Charsets.US_ASCII)
-        // Prefer 3.8
         out.write("RFB 003.008\n".toByteArray(Charsets.US_ASCII))
         out.flush()
 
-        // Security types (3.7+)
         val nTypes = inp.readUnsignedByte()
         if (nTypes == 0) {
-            val reasonLen = inp.readInt()
-            val reason = ByteArray(reasonLen.coerceAtLeast(0).coerceAtMost(4096))
+            val reasonLen = inp.readInt().coerceAtLeast(0).coerceAtMost(4096)
+            val reason = ByteArray(reasonLen)
             if (reason.isNotEmpty()) inp.readFully(reason)
             throw IOException("RFB rejected: " + String(reason, Charsets.UTF_8))
         }
         val types = IntArray(nTypes) { inp.readUnsignedByte() }
         if (!types.contains(1)) {
-            throw IOException("Server does not offer Security None (types=${types.toList()}). Start VNC with -SecurityTypes None")
+            throw IOException("Security None not offered: ${types.toList()}")
         }
-        out.writeByte(1) // None
+        out.writeByte(1)
         out.flush()
 
-        // SecurityResult (3.8)
         val result = inp.readInt()
         if (result != 0) {
-            val reasonLen = inp.readInt()
-            val reason = ByteArray(reasonLen.coerceAtLeast(0).coerceAtMost(4096))
+            val reasonLen = inp.readInt().coerceAtLeast(0).coerceAtMost(4096)
+            val reason = ByteArray(reasonLen)
             if (reason.isNotEmpty()) inp.readFully(reason)
             throw IOException("Auth failed: " + String(reason, Charsets.UTF_8))
         }
 
-        // ClientInit — shared
         out.writeByte(1)
         out.flush()
 
-        // ServerInit
         fbWidth = inp.readUnsignedShort()
         fbHeight = inp.readUnsignedShort()
-        // skip server pixel format (16 bytes) — we will set our own
         inp.skipBytes(16)
         val nameLen = inp.readInt().coerceAtLeast(0).coerceAtMost(1024)
         val nameBytes = ByteArray(nameLen)
@@ -162,9 +171,11 @@ class RfbClient(
             throw IOException("Invalid framebuffer ${fbWidth}x${fbHeight}")
         }
 
-        val bmp = Bitmap.createBitmap(fbWidth, fbHeight, Bitmap.Config.ARGB_8888)
-        bmp.eraseColor(0xFF000000.toInt())
-        bitmapRef.set(bmp)
+        synchronized(bmpLock) {
+            val bmp = Bitmap.createBitmap(fbWidth, fbHeight, Bitmap.Config.ARGB_8888)
+            bmp.eraseColor(0xFF000000.toInt())
+            bitmapRef.set(bmp)
+        }
 
         setPixelFormat32()
         setEncodingsRaw()
@@ -172,22 +183,20 @@ class RfbClient(
 
     private fun setPixelFormat32() {
         val out = output ?: return
-        // SetPixelFormat (type 0)
         out.writeByte(0)
         out.writeByte(0)
         out.writeByte(0)
         out.writeByte(0)
-        // bits-per-pixel, depth, big-endian, true-colour
         out.writeByte(32)
         out.writeByte(24)
-        out.writeByte(0) // little endian
-        out.writeByte(1) // true colour
-        out.writeShort(255) // red-max
-        out.writeShort(255) // green-max
-        out.writeShort(255) // blue-max
-        out.writeByte(16) // red-shift
-        out.writeByte(8)  // green-shift
-        out.writeByte(0)  // blue-shift
+        out.writeByte(0)
+        out.writeByte(1)
+        out.writeShort(255)
+        out.writeShort(255)
+        out.writeShort(255)
+        out.writeByte(16)
+        out.writeByte(8)
+        out.writeByte(0)
         out.writeByte(0)
         out.writeByte(0)
         out.writeByte(0)
@@ -196,11 +205,10 @@ class RfbClient(
 
     private fun setEncodingsRaw() {
         val out = output ?: return
-        // SetEncodings (type 2)
         out.writeByte(2)
         out.writeByte(0)
-        out.writeShort(1) // number of encodings
-        out.writeInt(0) // Raw
+        out.writeShort(1)
+        out.writeInt(0)
         out.flush()
     }
 
@@ -211,7 +219,7 @@ class RfbClient(
         if (w <= 0 || h <= 0) return
         synchronized(out) {
             try {
-                out.writeByte(3) // FramebufferUpdateRequest
+                out.writeByte(3)
                 out.writeByte(if (incremental) 1 else 0)
                 out.writeShort(0)
                 out.writeShort(0)
@@ -230,7 +238,7 @@ class RfbClient(
         val cy = y.coerceIn(0, (fbHeight - 1).coerceAtLeast(0))
         synchronized(out) {
             try {
-                out.writeByte(5) // PointerEvent
+                out.writeByte(5)
                 out.writeByte(buttonMask and 0xFF)
                 out.writeShort(cx)
                 out.writeShort(cy)
@@ -240,13 +248,12 @@ class RfbClient(
         }
     }
 
-    /** keysym: X11 keysym (e.g. 0x61 'a', 0xff0d Return) */
     fun sendKeyEvent(keysym: Int, down: Boolean) {
         val out = output ?: return
         if (state != State.CONNECTED) return
         synchronized(out) {
             try {
-                out.writeByte(4) // KeyEvent
+                out.writeByte(4)
                 out.writeByte(if (down) 1 else 0)
                 out.writeByte(0)
                 out.writeByte(0)
@@ -265,22 +272,23 @@ class RfbClient(
                     val type = inp.readUnsignedByte()
                     when (type) {
                         0 -> handleFramebufferUpdate(inp)
-                        1 -> { // SetColourMapEntries
+                        1 -> {
                             inp.readUnsignedByte()
                             inp.readUnsignedShort()
                             val n = inp.readUnsignedShort()
                             inp.skipBytes(n * 6)
                         }
-                        2 -> { // Bell — ignore
+                        2 -> {
                         }
-                        3 -> { // ServerCutText
+                        3 -> {
                             inp.skipBytes(3)
                             val len = inp.readInt().coerceAtLeast(0).coerceAtMost(1_000_000)
                             inp.skipBytes(len)
                         }
                         else -> {
-                            // Unknown — stop to avoid desync
-                            throw IOException("Unknown RFB server message type $type")
+                            // nao crashar — desligar com erro
+                            lastError = "RFB msg type $type"
+                            break
                         }
                     }
                 }
@@ -288,7 +296,10 @@ class RfbClient(
                 if (running.get()) {
                     lastError = e.message
                     state = State.ERROR
-                    onState?.invoke(state, lastError)
+                    try {
+                        onState?.invoke(state, lastError)
+                    } catch (_: Exception) {
+                    }
                 }
             } finally {
                 running.set(false)
@@ -297,11 +308,9 @@ class RfbClient(
     }
 
     private fun handleFramebufferUpdate(inp: DataInputStream) {
-        inp.readUnsignedByte() // padding
+        inp.readUnsignedByte()
         val nRects = inp.readUnsignedShort()
-        val bmp = bitmapRef.get() ?: return
-        val canvas = AndroidCanvas(bmp)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = false }
+        val bmp = synchronized(bmpLock) { bitmapRef.get() } ?: return
 
         for (i in 0 until nRects) {
             val x = inp.readUnsignedShort()
@@ -311,30 +320,36 @@ class RfbClient(
             val encoding = inp.readInt()
             when (encoding) {
                 0 -> readRawRect(inp, bmp, x, y, w, h)
-                -239 /* Cursor pseudo */ -> {
-                    // cursor image + mask — skip for MVP
+                -239 -> {
                     val pixels = w * h * 4
                     val mask = ((w + 7) / 8) * h
                     inp.skipBytes(pixels + mask)
                 }
-                -223 /* DesktopSize */ -> {
-                    // new size already in x,y as width/height in some servers;
-                    // RFB: x=width y=height for DesktopSize pseudo-encoding
-                    if (w > 0 && h > 0 && (w != fbWidth || h != fbHeight)) {
+                -223 -> {
+                    // DesktopSize: nao reciclar bitmap antigo (Compose pode estar a ler)
+                    if (w > 0 && h > 0 && w <= 4096 && h <= 4096) {
                         fbWidth = w
                         fbHeight = h
-                        val nb = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                        nb.eraseColor(0xFF000000.toInt())
-                        bitmapRef.set(nb)
-                        try { bmp.recycle() } catch (_: Exception) {}
+                        synchronized(bmpLock) {
+                            val nb = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                            nb.eraseColor(0xFF000000.toInt())
+                            bitmapRef.set(nb)
+                        }
                     }
                 }
-                else -> throw IOException("Unsupported encoding $encoding (only Raw in MVP)")
+                else -> {
+                    // encoding desconhecida: tentar saltar se for 0 size, senao abortar frame
+                    if (w > 0 && h > 0) {
+                        throw IOException("encoding $encoding")
+                    }
+                }
             }
         }
-        frameVersion.updateAndGet { it + 1 }
-        onFrame?.invoke()
-        // continuous incremental updates
+        frameVersion.incrementAndGet()
+        try {
+            onFrame?.invoke()
+        } catch (_: Exception) {
+        }
         requestFramebufferUpdate(incremental = true)
     }
 
@@ -347,6 +362,10 @@ class RfbClient(
         h: Int,
     ) {
         if (w <= 0 || h <= 0) return
+        if (bmp.isRecycled) {
+            inp.skipBytes(w * h * 4)
+            return
+        }
         val rowBytes = w * 4
         val row = ByteArray(rowBytes)
         val pixels = IntArray(w)
@@ -357,13 +376,15 @@ class RfbClient(
                 val b = row[bi].toInt() and 0xFF
                 val g = row[bi + 1].toInt() and 0xFF
                 val r = row[bi + 2].toInt() and 0xFF
-                // skip alpha/pad byte
                 bi += 4
                 pixels[col] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
             }
             val destY = y + rowIdx
-            if (destY in 0 until bmp.height && x + w <= bmp.width) {
-                bmp.setPixels(pixels, 0, w, x, destY, w, 1)
+            try {
+                if (!bmp.isRecycled && destY in 0 until bmp.height && x >= 0 && x + w <= bmp.width) {
+                    bmp.setPixels(pixels, 0, w, x, destY, w, 1)
+                }
+            } catch (_: Exception) {
             }
         }
     }
