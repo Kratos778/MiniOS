@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -63,7 +64,9 @@ fun RfbViewer(
     var showKeys by remember { mutableStateOf(false) }
     var gamerMode by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
-    var imeText by remember { mutableStateOf("") }
+    // Buffer com espaco para o IME nao fechar sozinho
+    var imeText by remember { mutableStateOf(" ") }
+    val keyboard = LocalSoftwareKeyboardController.current
 
     fun tapKey(keysym: Int) {
         if (client.state != RfbClient.State.CONNECTED) return
@@ -71,13 +74,30 @@ fun RfbViewer(
         client.sendKeyEvent(keysym, false)
     }
 
+    fun tapModKey(mod: Int, key: Int) {
+        if (client.state != RfbClient.State.CONNECTED) return
+        client.sendKeyEvent(mod, true)
+        client.sendKeyEvent(key, true)
+        client.sendKeyEvent(key, false)
+        client.sendKeyEvent(mod, false)
+    }
+
     fun sendChar(ch: Char) {
         when (ch) {
             '\n' -> tapKey(0xff0d)
+            ' ' -> tapKey(0x20)
             else -> {
                 val code = ch.code
                 if (code in 0x20..0xFF) tapKey(code)
             }
+        }
+    }
+
+    fun openKeyboard() {
+        try {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        } catch (_: Exception) {
         }
     }
 
@@ -152,6 +172,7 @@ fun RfbViewer(
                                 client.sendPointerEvent(fx, fy, 0)
                             }
                         },
+                        onDoubleTap = { openKeyboard() },
                     )
                 }
                 .pointerInput(active, client.fbWidth, client.fbHeight) {
@@ -214,7 +235,6 @@ fun RfbViewer(
             }
         }
 
-        // IME invisível
         if (active) {
             BasicTextField(
                 value = imeText,
@@ -222,12 +242,16 @@ fun RfbViewer(
                     if (new.length > imeText.length) {
                         new.substring(imeText.length).forEach { sendChar(it) }
                     } else if (new.length < imeText.length) {
-                        repeat(imeText.length - new.length) { tapKey(0xff08) }
+                        repeat((imeText.length - new.length).coerceAtMost(32)) {
+                            tapKey(0xff08)
+                        }
                     }
-                    imeText = ""
+                    // manter pelo menos 1 espaco para o IME voltar a abrir
+                    imeText = " "
                 },
                 modifier = Modifier
                     .align(Alignment.BottomStart)
+                    .fillMaxWidth()
                     .padding(0.dp)
                     .focusRequester(focusRequester),
                 textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
@@ -246,17 +270,14 @@ fun RfbViewer(
                     SpecialKeysPanel(
                         gamerMode = gamerMode,
                         onKey = { tapKey(it) },
+                        onModKey = { mod, key -> tapModKey(mod, key) },
                         onToggleGamer = { gamerMode = !gamerMode },
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TinyBtn("⌨") {
-                        try {
-                            focusRequester.requestFocus()
-                        } catch (_: Exception) {
-                        }
-                    }
+                    TinyBtn("⌨") { openKeyboard() }
                     TinyBtn("⏎") { tapKey(0xff0d) }
+                    TinyBtn("⌫") { tapKey(0xff08) }
                     TinyBtn(if (showKeys) "▾" else "⌨+") { showKeys = !showKeys }
                 }
             }
@@ -282,6 +303,7 @@ private fun TinyBtn(label: String, onClick: () -> Unit) {
 private fun SpecialKeysPanel(
     gamerMode: Boolean,
     onKey: (Int) -> Unit,
+    onModKey: (Int, Int) -> Unit,
     onToggleGamer: () -> Unit,
 ) {
     val scroll = rememberScrollState()
@@ -296,7 +318,7 @@ private fun SpecialKeysPanel(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = if (gamerMode) "Gamer HUD" else "Teclas",
+                text = if (gamerMode) "Gamer" else "Teclas",
                 color = Color(0xFF58A6FF),
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
@@ -315,6 +337,17 @@ private fun SpecialKeysPanel(
                 .padding(top = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
+            // Fechar janela Openbox = Alt+F4
+            Text(
+                text = "Close",
+                color = Color(0xFFFF7B72),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .background(Color(0xFF3D1F1F), RoundedCornerShape(3.dp))
+                    .clickable { onModKey(0xffe9, 0xffc1) }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+            )
             val keys = if (gamerMode) {
                 listOf(
                     "Tab" to 0xff09,
@@ -325,7 +358,7 @@ private fun SpecialKeysPanel(
                     "→" to 0xff53,
                     "Ctrl" to 0xffe3,
                     "Alt" to 0xffe9,
-                    "Space" to 0x20,
+                    "Spc" to 0x20,
                 )
             } else {
                 listOf(
