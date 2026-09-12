@@ -5,6 +5,7 @@
  */
 package com.minios.elizierdias.linux.vnc
 
+import android.content.Context
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -15,7 +16,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,10 +48,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
-/**
- * Viewer RFB embutido na janela Linux do NoskOS.
- * Toque → rato; teclado Android → KeyEvent RFB.
- */
 @Composable
 fun RfbViewer(
     active: Boolean,
@@ -70,7 +66,7 @@ fun RfbViewer(
     fun showKeyboard() {
         try {
             focusRequester.requestFocus()
-            val imm = context.getSystemService(InputMethodManager::class.java)
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
             imm?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
         } catch (_: Exception) {
         }
@@ -127,8 +123,14 @@ fun RfbViewer(
                 .focusRequester(focusRequester)
                 .focusable()
                 .onPreviewKeyEvent { ke ->
-                    if (!active || client.state != RfbClient.State.CONNECTED) return@onPreviewKeyEvent false
-                    val native = ke.nativeKeyEvent ?: return@onPreviewKeyEvent false
+                    if (!active || client.state != RfbClient.State.CONNECTED) {
+                        return@onPreviewKeyEvent false
+                    }
+                    val native = try {
+                        ke.nativeKeyEvent
+                    } catch (_: Exception) {
+                        return@onPreviewKeyEvent false
+                    }
                     val sym = RfbKeymap.keysym(native)
                     if (sym == 0) return@onPreviewKeyEvent false
                     when (ke.type) {
@@ -152,10 +154,8 @@ fun RfbViewer(
                         val vw = size.width.toFloat().coerceAtLeast(1f)
                         val vh = size.height.toFloat().coerceAtLeast(1f)
                         val scale = minOf(vw / fw, vh / fh)
-                        val dw = fw * scale
-                        val dh = fh * scale
-                        val ox = (vw - dw) / 2f
-                        val oy = (vh - dh) / 2f
+                        val ox = (vw - fw * scale) / 2f
+                        val oy = (vh - fh * scale) / 2f
                         return ((x - ox) / scale).toInt() to ((y - oy) / scale).toInt()
                     }
                     detectTapGestures(
@@ -169,9 +169,7 @@ fun RfbViewer(
                                 client.sendPointerEvent(fx, fy, 0)
                             }
                         },
-                        onDoubleTap = {
-                            showKeyboard()
-                        },
+                        onDoubleTap = { showKeyboard() },
                     )
                 }
                 .pointerInput(active, client.fbWidth, client.fbHeight) {
@@ -185,9 +183,11 @@ fun RfbViewer(
                             val scale = minOf(vw / fw, vh / fh)
                             val ox = (vw - fw * scale) / 2f
                             val oy = (vh - fh * scale) / 2f
-                            val fx = ((offset.x - ox) / scale).toInt()
-                            val fy = ((offset.y - oy) / scale).toInt()
-                            client.sendPointerEvent(fx, fy, 1)
+                            client.sendPointerEvent(
+                                ((offset.x - ox) / scale).toInt(),
+                                ((offset.y - oy) / scale).toInt(),
+                                1,
+                            )
                         },
                         onDrag = { change, _ ->
                             change.consume()
@@ -196,9 +196,11 @@ fun RfbViewer(
                             val scale = minOf(vw / fw, vh / fh)
                             val ox = (vw - fw * scale) / 2f
                             val oy = (vh - fh * scale) / 2f
-                            val fx = ((change.position.x - ox) / scale).toInt()
-                            val fy = ((change.position.y - oy) / scale).toInt()
-                            client.sendPointerEvent(fx, fy, 1)
+                            client.sendPointerEvent(
+                                ((change.position.x - ox) / scale).toInt(),
+                                ((change.position.y - oy) / scale).toInt(),
+                                1,
+                            )
                         },
                         onDragEnd = { client.sendPointerEvent(0, 0, 0) },
                         onDragCancel = { client.sendPointerEvent(0, 0, 0) },
@@ -207,8 +209,11 @@ fun RfbViewer(
             contentAlignment = Alignment.Center,
         ) {
             val bmp = client.currentBitmap()
-            val _f = frameId
-            if (active && bmp != null && !bmp.isRecycled && client.state == RfbClient.State.CONNECTED) {
+            @Suppress("UNUSED_VARIABLE")
+            val frameTick = frameId
+            if (active && bmp != null && !bmp.isRecycled &&
+                client.state == RfbClient.State.CONNECTED
+            ) {
                 Image(
                     bitmap = bmp.asImageBitmap(),
                     contentDescription = "Linux desktop",
@@ -227,7 +232,6 @@ fun RfbViewer(
             }
         }
 
-        // Barra mínima: teclado
         if (active) {
             Row(
                 modifier = Modifier
