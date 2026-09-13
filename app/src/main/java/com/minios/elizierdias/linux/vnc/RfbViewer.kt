@@ -9,9 +9,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.drag
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,11 +43,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -56,13 +53,12 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
-import kotlin.math.hypot
 
 /**
- * Viewer RFB com rato virtual (igual NoskOS shell):
+ * Rato virtual (como shell NoskOS):
  * - Arrastar = move cursor SEM clicar
- * - Toque curto = clique esquerdo
- * - Pressao longa + arrastar = clique + arrastar (mover janelas Openbox)
+ * - Toque = clique esquerdo
+ * - Botao L activo + arrastar = arrastar janelas (botao esquerdo premido)
  */
 @Composable
 fun RfbViewer(
@@ -77,14 +73,13 @@ fun RfbViewer(
     var viewSize by remember { mutableStateOf(IntSize.Zero) }
     var showKeys by remember { mutableStateOf(false) }
     var gamerMode by remember { mutableStateOf(false) }
-    // Cursor virtual em coords do ecran Compose
+    var lmbHold by remember { mutableStateOf(false) }
     var cursorX by remember { mutableFloatStateOf(-1f) }
     var cursorY by remember { mutableFloatStateOf(-1f) }
     var cursorVisible by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     var imeText by remember { mutableStateOf(" ") }
     val keyboard = LocalSoftwareKeyboardController.current
-    val viewConfig = LocalViewConfiguration.current
 
     fun tapKey(keysym: Int) {
         if (client.state != RfbClient.State.CONNECTED) return
@@ -168,12 +163,10 @@ fun RfbViewer(
             modifier = Modifier
                 .fillMaxSize()
                 .onSizeChanged { viewSize = it }
-                .pointerInput(active, client.fbWidth, client.fbHeight, viewSize) {
+                .pointerInput(active, client.fbWidth, client.fbHeight, viewSize, lmbHold) {
                     if (!active || client.fbWidth <= 0) return@pointerInput
                     val fw = client.fbWidth.toFloat()
                     val fh = client.fbHeight.toFloat()
-                    val longPressMs = viewConfig.longPressTimeoutMillis
-                    val touchSlop = viewConfig.touchSlop
 
                     fun toFb(x: Float, y: Float): Pair<Int, Int> {
                         val vw = size.width.toFloat().coerceAtLeast(1f)
@@ -181,67 +174,75 @@ fun RfbViewer(
                         val scale = minOf(vw / fw, vh / fh)
                         val ox = (vw - fw * scale) / 2f
                         val oy = (vh - fh * scale) / 2f
-                        val fx = ((x - ox) / scale).toInt().coerceIn(0, client.fbWidth - 1)
-                        val fy = ((y - oy) / scale).toInt().coerceIn(0, client.fbHeight - 1)
+                        val fx = ((x - ox) / scale).toInt().coerceIn(0, (client.fbWidth - 1).coerceAtLeast(0))
+                        val fy = ((y - oy) / scale).toInt().coerceIn(0, (client.fbHeight - 1).coerceAtLeast(0))
                         return fx to fy
                     }
 
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        val start = down.position
-                        cursorX = start.x
-                        cursorY = start.y
-                        cursorVisible = true
-
-                        var (fx, fy) = toFb(start.x, start.y)
-                        // move cursor sem clicar
-                        client.sendPointerEvent(fx, fy, 0)
-
-                        var longPress = false
-                        var dragging = false
-                        val downTime = System.currentTimeMillis()
-
-                        // esperar long-press OU movimento OU release
-                        while (true) {
-                            val event = withTimeoutOrNull(longPressMs) {
-                                awaitPointerEvent()
-                            }
-                            if (event == null) {
-                                // long press — botao esquerdo premido
-                                longPress = true
+                    detectTapGestures(
+                        onTap = { offset ->
+                            cursorX = offset.x
+                            cursorY = offset.y
+                            cursorVisible = true
+                            val (fx, fy) = toFb(offset.x, offset.y)
+                            if (lmbHold) {
+                                // so move
                                 client.sendPointerEvent(fx, fy, 1)
-                                break
-                            }
-                            val change = event.changes.firstOrNull() ?: break
-                            if (!change.pressed) {
-                                // toque curto = clique
+                            } else {
                                 client.sendPointerEvent(fx, fy, 1)
                                 client.sendPointerEvent(fx, fy, 0)
-                                change.consume()
-                                return@awaitEachGesture
                             }
-                            val dx = change.position.x - start.x
-                            val dy = change.position.y - start.y
-                            if (hypot(dx, dy) > touchSlop) {
-                                dragging = true
-                                break
-                            }
-                        }
+                        },
+                        onDoubleTap = { openKeyboard() },
+                    )
+                }
+                .pointerInput(active, client.fbWidth, client.fbHeight, lmbHold) {
+                    if (!active || client.fbWidth <= 0) return@pointerInput
+                    val fw = client.fbWidth.toFloat()
+                    val fh = client.fbHeight.toFloat()
 
-                        // arrastar: sem botao (move) ou com botao (long-press)
-                        val mask = if (longPress) 1 else 0
-                        drag(down.id) { change ->
+                    fun toFb(x: Float, y: Float): Pair<Int, Int> {
+                        val vw = size.width.toFloat().coerceAtLeast(1f)
+                        val vh = size.height.toFloat().coerceAtLeast(1f)
+                        val scale = minOf(vw / fw, vh / fh)
+                        val ox = (vw - fw * scale) / 2f
+                        val oy = (vh - fh * scale) / 2f
+                        val fx = ((x - ox) / scale).toInt().coerceIn(0, (client.fbWidth - 1).coerceAtLeast(0))
+                        val fy = ((y - oy) / scale).toInt().coerceIn(0, (client.fbHeight - 1).coerceAtLeast(0))
+                        return fx to fy
+                    }
+
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            cursorX = offset.x
+                            cursorY = offset.y
+                            cursorVisible = true
+                            val (fx, fy) = toFb(offset.x, offset.y)
+                            val mask = if (lmbHold) 1 else 0
+                            client.sendPointerEvent(fx, fy, mask)
+                        },
+                        onDrag = { change, _ ->
                             change.consume()
                             cursorX = change.position.x
                             cursorY = change.position.y
-                            val p = toFb(change.position.x, change.position.y)
-                            fx = p.first
-                            fy = p.second
+                            val (fx, fy) = toFb(change.position.x, change.position.y)
+                            val mask = if (lmbHold) 1 else 0
                             client.sendPointerEvent(fx, fy, mask)
-                        }
-                        // soltar
-                        client.sendPointerEvent(fx, fy, 0)
-                    }
+                        },
+                        onDragEnd = {
+                            val (fx, fy) = toFb(cursorX, cursorY)
+                            if (lmbHold) {
+                                // mantem botao se L activo — so envia posicao
+                                client.sendPointerEvent(fx, fy, 1)
+                            } else {
+                                client.sendPointerEvent(fx, fy, 0)
+                            }
+                        },
+                        onDragCancel = {
+                            val (fx, fy) = toFb(cursorX, cursorY)
+                            client.sendPointerEvent(fx, fy, if (lmbHold) 1 else 0)
+                        },
+                    )
                 },
             contentAlignment = Alignment.Center,
         ) {
@@ -268,28 +269,27 @@ fun RfbViewer(
                 )
             }
 
-            // Cursor virtual visivel (como rato NoskOS)
             if (active && cursorVisible && cursorX >= 0f) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val cx = cursorX
                     val cy = cursorY
-                    val r = 10f
+                    val r = 12f
                     drawCircle(
-                        color = Color(0xEE58A6FF),
+                        color = if (lmbHold) Color(0xEEF85149) else Color(0xEE58A6FF),
                         radius = r,
                         center = Offset(cx, cy),
                         style = Stroke(width = 2.5f),
                     )
                     drawLine(
-                        Color(0xEE58A6FF),
-                        Offset(cx - r - 4f, cy),
-                        Offset(cx + r + 4f, cy),
+                        if (lmbHold) Color(0xEEF85149) else Color(0xEE58A6FF),
+                        Offset(cx - r - 5f, cy),
+                        Offset(cx + r + 5f, cy),
                         strokeWidth = 1.5f,
                     )
                     drawLine(
-                        Color(0xEE58A6FF),
-                        Offset(cx, cy - r - 4f),
-                        Offset(cx, cy + r + 4f),
+                        if (lmbHold) Color(0xEEF85149) else Color(0xEE58A6FF),
+                        Offset(cx, cy - r - 5f),
+                        Offset(cx, cy + r + 5f),
                         strokeWidth = 1.5f,
                     )
                 }
@@ -335,6 +335,35 @@ fun RfbViewer(
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // L = botao esquerdo do rato (segurar para arrastar janelas)
+                    Text(
+                        text = if (lmbHold) "L●" else "L",
+                        color = if (lmbHold) Color(0xFFF85149) else Color(0xFFC9D1D9),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier
+                            .background(
+                                if (lmbHold) Color(0xCC3D1F1F) else Color(0xCC161B22),
+                                RoundedCornerShape(4.dp),
+                            )
+                            .clickable {
+                                lmbHold = !lmbHold
+                                if (!lmbHold && cursorX >= 0f) {
+                                    // soltar botao ao desligar L
+                                    val fw = client.fbWidth.toFloat().coerceAtLeast(1f)
+                                    val fh = client.fbHeight.toFloat().coerceAtLeast(1f)
+                                    val vw = viewSize.width.toFloat().coerceAtLeast(1f)
+                                    val vh = viewSize.height.toFloat().coerceAtLeast(1f)
+                                    val scale = minOf(vw / fw, vh / fh)
+                                    val ox = (vw - fw * scale) / 2f
+                                    val oy = (vh - fh * scale) / 2f
+                                    val fx = ((cursorX - ox) / scale).toInt()
+                                    val fy = ((cursorY - oy) / scale).toInt()
+                                    client.sendPointerEvent(fx, fy, 0)
+                                }
+                            }
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                    )
                     TinyBtn("⌨") { openKeyboard() }
                     TinyBtn("⏎") { tapKey(0xff0d) }
                     TinyBtn("⌫") { tapKey(0xff08) }
@@ -458,14 +487,4 @@ private fun SpecialKeysPanel(
             }
         }
     }
-}
-
-// helpers usados no gesture (timeout)
-private suspend fun <T> androidx.compose.ui.input.pointer.AwaitPointerEventScope.withTimeoutOrNull(
-    timeMillis: Long,
-    block: suspend androidx.compose.ui.input.pointer.AwaitPointerEventScope.() -> T,
-): T? = try {
-    kotlinx.coroutines.withTimeout(timeMillis) { block() }
-} catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-    null
 }
