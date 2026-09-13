@@ -1,7 +1,6 @@
 package com.minios.elizierdias.personalization
 
 import android.net.Uri
-import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,8 +24,13 @@ import java.io.File
 /**
  * Wallpaper de vídeo em loop.
  *
- * Proporção: RESIZE_MODE_ZOOM = preenche o ecrã, mantém aspect ratio,
- * corta bordas se preciso — **não estica** (não distorce).
+ * Proporção **FIT (contain)**:
+ * - vídeo inteiro visível (não corta)
+ * - dentro das bordas (não sai do ecrã)
+ * - aspect ratio preservado (não estica)
+ * - pode haver faixas laterais/superior se o ratio for diferente do ecrã
+ *
+ * Desempenho: buffer curto + limite 1280x720 / bitrate para telemóveis fracos.
  */
 @Composable
 fun VideoWallpaper(
@@ -50,14 +54,27 @@ fun VideoWallpaper(
 
     val player = remember(source, contentKey) {
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(500, 1_500, 250, 500)
-            .setTargetBufferBytes(2 * 1024 * 1024)
+            .setBufferDurationsMs(
+                /* min */ 300,
+                /* max */ 1_000,
+                /* playback */ 150,
+                /* rebuffer */ 300,
+            )
+            .setTargetBufferBytes(1 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         ExoPlayer.Builder(context)
             .setLoadControl(loadControl)
             .build()
             .apply {
+                // Limitar resolução/bitrate — menos GPU/RAM em 2GB
+                trackSelectionParameters = trackSelectionParameters
+                    .buildUpon()
+                    .setMaxVideoSize(1280, 720)
+                    .setMaxVideoBitrate(2_500_000)
+                    .build()
+
                 setMediaItem(MediaItem.fromUri(mediaUri))
                 repeatMode = Player.REPEAT_MODE_ONE
                 volume = if (soundEnabled) 1f else 0f
@@ -97,24 +114,17 @@ fun VideoWallpaper(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 useController = false
-                // ZOOM = center-crop: enche o ecrã sem distorcer
-                // (FIT deixaria faixas; FILL esticaria — evitar)
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                // TextureView respeita melhor o resizeMode que SurfaceView em alguns devices
-                setUseController(false)
-                try {
-                    videoSurfaceView?.let { /* keep default */ }
-                } catch (_: Exception) {
-                }
+                // FIT = contain: cabe todo, sem cortar, sem esticar
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 this.player = player
-                setBackgroundColor(0xFF0D1117.toInt())
-                setShutterBackgroundColor(0xFF0D1117.toInt())
+                val bg = 0xFF0D1117.toInt()
+                setBackgroundColor(bg)
+                setShutterBackgroundColor(bg)
 
                 player.addListener(object : Player.Listener {
                     override fun onVideoSizeChanged(videoSize: VideoSize) {
                         if (videoSize.width > 0 && videoSize.height > 0) {
-                            // Forçar recálculo do aspect ratio do frame
-                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                             requestLayout()
                         }
                     }
@@ -123,8 +133,7 @@ fun VideoWallpaper(
         },
         update = { view ->
             if (view.player !== player) view.player = player
-            // Sempre reforçar: nunca FILL (esticado)
-            view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             try {
                 player.volume = if (soundEnabled) 1f else 0f
             } catch (_: Exception) {
