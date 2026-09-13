@@ -191,11 +191,12 @@ fun Desktop() {
                 }
             }
 
+            // Taskbar SEMPRE acima do VirtualMouse (zIndex) + fora da area do rato
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(TaskbarHeight)
-                    .zIndex(1f),
+                    .zIndex(200_000f),
             ) {
                 Taskbar(
                     openWindows = windowManager.windows,
@@ -216,10 +217,12 @@ fun Desktop() {
             }
         }
 
+        // Nao cobre a taskbar — toques no Start/Sair/apps passam sempre
         VirtualMouse(
             enabled = mouseEnabled,
             modifier = Modifier
                 .fillMaxSize()
+                .padding(bottom = TaskbarHeight)
                 .zIndex(100_000f),
         )
     }
