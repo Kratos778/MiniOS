@@ -3,11 +3,8 @@ package com.minios.elizierdias.shell.desktop
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -57,7 +54,7 @@ import com.minios.elizierdias.core.PowerMode
 import com.minios.elizierdias.personalization.AnimatedWallpaper
 import com.minios.elizierdias.personalization.VideoWallpaper
 import com.minios.elizierdias.personalization.Wallpapers
-import com.minios.elizierdias.shell.LauncherExit
+import com.minios.elizierdias.shell.exitMiniOS
 import com.minios.elizierdias.shell.mouse.VirtualMouse
 import com.minios.elizierdias.shell.startmenu.StartMenu
 import com.minios.elizierdias.shell.taskbar.Taskbar
@@ -96,10 +93,6 @@ fun Desktop() {
         } else {
             windowManager.openApp(app, desktopSizePx)
         }
-    }
-
-    fun exitMiniOS(ctx: android.content.Context) {
-        LauncherExit.exit(ctx)
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
