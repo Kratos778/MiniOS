@@ -7,6 +7,7 @@
 
 package com.minios.elizierdias.linux
 
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,6 +50,7 @@ class LinuxSession(
                 c.contains("tigervnc") ||
                 c.contains("openbox") ||
                 c.contains("vncserver") ||
+                c.contains("start-vnc") ||
                 c.contains("install -y") ||
                 c.contains("wget") ||
                 c.contains("curl") ||
@@ -57,8 +59,8 @@ class LinuxSession(
     }
 
     /**
-     * Executa um comando (pode ser multi-linha / heredoc).
-     * Scripts multi-linha passam por `bash -s` para preservar <<EOF.
+     * Multi-linha: base64 → bash -s (sem heredoc).
+     * O heredoc NOSKOS_EOF partia no PRoot/exec.
      */
     suspend fun execute(
         command: String,
@@ -71,7 +73,6 @@ class LinuxSession(
 
         val isMultiLine = trimmed.contains('\n')
 
-        // Builtins só em linha única
         if (!isMultiLine) {
             if (trimmed == "cd" || trimmed.startsWith("cd ")) {
                 return@withContext handleCd(trimmed)
@@ -98,14 +99,17 @@ class LinuxSession(
             append(shellQuote(cwd))
             append(" && ")
             if (isMultiLine) {
-                // bash -s lê o script do stdin embutido — heredocs funcionam
-                append("bash -s <<'NOSKOS_EOF'\n")
-                append(trimmed)
-                append("\nNOSKOS_EOF")
+                val b64 = Base64.encodeToString(
+                    trimmed.toByteArray(Charsets.UTF_8),
+                    Base64.NO_WRAP,
+                )
+                append("echo ")
+                append(b64)
+                append(" | base64 -d | bash -s 2>&1")
             } else {
                 append(trimmed)
+                append(" 2>&1")
             }
-            append(" 2>&1")
         }
 
         val timeout = timeoutFor(trimmed)
