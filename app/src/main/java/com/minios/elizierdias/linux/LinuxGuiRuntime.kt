@@ -95,21 +95,21 @@ class LinuxGuiRuntime(
         }
     }
 
-    /** Script real no PATH — nao depende de heredoc no Terminal. */
+    /** Script real no PATH — geometria embutida (sem var shell GEO). */
     private fun ensureStartVncScript(geo: String) {
         val bin = File(LinuxConfig.rootfsDir(context), "usr/local/bin").also { it.mkdirs() }
         val f = File(bin, "start-vnc")
+        // geo ja interpolado em Kotlin — nao usar \$GEO (raw string nao escapa $)
         f.writeText(
             """
             |#!/bin/sh
             |export HOME=/root USER=root DISPLAY=:1
-            |GEO="${geo}"
             |vncserver -kill :1 2>/dev/null || true
             |rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 /root/.vnc/*.pid 2>/dev/null || true
             |pkill -9 Xtigervnc 2>/dev/null || true
             |pkill -9 Xvnc 2>/dev/null || true
             |sleep 0.5
-            |vncserver :1 -geometry "\$GEO" -depth 24 -localhost yes -SecurityTypes None -xstartup /root/.vnc/xstartup
+            |vncserver :1 -geometry $geo -depth 24 -localhost yes -SecurityTypes None -xstartup /root/.vnc/xstartup
             |vncserver -list
             """.trimMargin(),
         )
@@ -163,14 +163,12 @@ class LinuxGuiRuntime(
     }
 
     private suspend fun cleanStaleLocks() {
-        // Reset duro — “already running” com lista vazia
         runtime.exec(
             "vncserver -kill :1 2>/dev/null; " +
                 "pkill -9 -f Xtigervnc 2>/dev/null; " +
-                "pkill -9 -f 'Xvnc :1' 2>/dev/null; " +
+                "pkill -9 -f Xvnc 2>/dev/null; " +
                 "rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 " +
-                "/root/.vnc/*.pid /root/.vnc/localhost:1.pid " +
-                "/tmp/.X11-unix/X1 2>/dev/null; " +
+                "/root/.vnc/*.pid /root/.vnc/localhost:1.pid 2>/dev/null; " +
                 "sleep 0.3; echo cleaned",
             timeoutSec = 20,
         )
@@ -192,7 +190,7 @@ class LinuxGuiRuntime(
                 val pkgs =
                     "tigervnc-standalone-server tigervnc-common openbox xterm x11-xserver-utils"
                 runtime.exec("DEBIAN_FRONTEND=noninteractive apt-get update -y", timeoutSec = 300)
-                val install = runtime.exec(
+                runtime.exec(
                     "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $pkgs",
                     timeoutSec = 600,
                 )
@@ -201,7 +199,7 @@ class LinuxGuiRuntime(
                 if (isVncInstalled()) {
                     Result.success("[GUI] Pacotes OK")
                 } else {
-                    Result.failure(IllegalStateException("Falha GUI: ${install.exceptionOrNull()?.message}"))
+                    Result.failure(IllegalStateException("Falha GUI"))
                 }
             } catch (e: Exception) {
                 Result.failure(e)
@@ -242,8 +240,10 @@ class LinuxGuiRuntime(
         val r = runtime.exec("vncserver -list 2>/dev/null || true", timeoutSec = 15)
         val out = r.getOrNull()?.stdout.orEmpty()
         val hasStale = out.contains("stale", ignoreCase = true)
-        val hasDisplay = Regex("""(?m)^\s*1\s+""").containsMatchIn(out) ||
-            out.contains(":$displayNum")
+        val hasDisplay = out.lines().any { line ->
+            val t = line.trim()
+            t.startsWith("1") || t.contains(":$displayNum")
+        }
         val running = hasDisplay && !hasStale
         GuiStatus(
             running = running,
@@ -251,8 +251,7 @@ class LinuxGuiRuntime(
             port = vncPort,
             geometry = geo,
             message = when {
-                hasStale || (out.contains("already") && !hasDisplay) ->
-                    "VNC stale — toca Iniciar"
+                hasStale -> "VNC stale — toca Iniciar"
                 running -> "VNC ativo $displayName ($vncPort)"
                 else -> "VNC parado"
             },
@@ -298,7 +297,6 @@ class LinuxGuiRuntime(
                         st.copy(running = true, geometry = geo, message = "VNC OK $geo\n$body"),
                     )
                 } else {
-                    // segunda tentativa apos limpeza
                     cleanStaleLocks()
                     val r2 = runtime.exec(cmd, timeoutSec = 60)
                     val body2 = r2.getOrNull()?.stdout.orEmpty()
@@ -336,7 +334,7 @@ class LinuxGuiRuntime(
             }
             val cmd =
                 "export DISPLAY=:1 HOME=/root USER=root; " +
-                    "nohup $safe >/tmp/noskos-app.log 2>&1 & echo PID:\$!; sleep 0.5; " +
+                    "nohup $safe >/tmp/noskos-app.log 2>&1 & echo STARTED; sleep 0.5; " +
                     "tail -5 /tmp/noskos-app.log 2>/dev/null || true"
             val r = runtime.exec(cmd, timeoutSec = 25)
             val body = r.getOrNull()?.stdout.orEmpty() + r.getOrNull()?.stderr.orEmpty()
