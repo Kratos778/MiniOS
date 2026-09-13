@@ -83,7 +83,8 @@ fun AnimatedWallpaper(
             return@Canvas
         }
 
-        val scale = maxOf(size.width / sourceWidth, size.height / sourceHeight)
+        // contain: maior possível sem cortar nem sair das bordas
+        val scale = minOf(size.width / sourceWidth, size.height / sourceHeight)
         val drawWidth = sourceWidth * scale
         val drawHeight = sourceHeight * scale
         val offsetX = (size.width - drawWidth) / 2f
