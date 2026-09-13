@@ -120,7 +120,6 @@ fun Desktop() {
                     videoSound = wallpaperVideoSound,
                 )
 
-                // Grelha 2 colunas — todos os apps visíveis, com scroll se precisar
                 val icons = AppRegistry.desktopIcons
                 Column(
                     modifier = Modifier
@@ -240,7 +239,8 @@ private fun WallpaperLayer(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clipToBounds(),
+            .clipToBounds()
+            .background(Color(0xFF0D1117)),
     ) {
         if (isVideo) {
             key(wallpaperUri, wallpaperVersion, videoSound) {
@@ -280,7 +280,7 @@ private fun WallpaperLayer(
                     model = model,
                     contentDescription = "Wallpaper",
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
+                    contentScale = ContentScale.Fit,
                 )
             }
         } else {
