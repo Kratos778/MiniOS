@@ -10,8 +10,10 @@ package com.minios.elizierdias
 import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
 import android.view.WindowManager
@@ -42,8 +44,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         hideSystemBars()
 
-        // Pedir para ser launcher / ecran inicial (se ainda nao for)
         maybeRequestHomeRole()
+        maybeRequestIgnoreBatteryOptimizations()
 
         setContent {
             MiniOSTheme {
@@ -54,11 +56,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Android so mostra o seletor de launcher se pedirmos ROLE_HOME
-     * ou se o utilizador carregar no botao Home. Sem isto o NoskOS
-     * parece so "mais uma app".
-     */
     private fun maybeRequestHomeRole() {
         try {
             val prefs = getSharedPreferences("noskos_setup", MODE_PRIVATE)
@@ -74,7 +71,6 @@ class MainActivity : ComponentActivity() {
                     return
                 }
             }
-            // Fallback: ecran de apps iniciais do sistema
             try {
                 startActivity(
                     Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -83,6 +79,37 @@ class MainActivity : ComponentActivity() {
             } catch (_: Exception) {
             }
         } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Em telemoveis 4GB o Android mata o NoskOS muito depressa se a bateria
+     * estiver a "optimizar" a app. Pedimos exclusao uma vez.
+     */
+    private fun maybeRequestIgnoreBatteryOptimizations() {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+            val prefs = getSharedPreferences("noskos_setup", MODE_PRIVATE)
+            if (prefs.getBoolean("battery_prompt_done", false)) return
+
+            val pm = getSystemService(PowerManager::class.java) ?: return
+            if (pm.isIgnoringBatteryOptimizations(packageName)) {
+                prefs.edit().putBoolean("battery_prompt_done", true).apply()
+                return
+            }
+
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+            prefs.edit().putBoolean("battery_prompt_done", true).apply()
+        } catch (_: Exception) {
+            try {
+                startActivity(
+                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                )
+            } catch (_: Exception) {
+            }
         }
     }
 
