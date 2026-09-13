@@ -1,6 +1,7 @@
 package com.minios.elizierdias.personalization
 
 import android.net.Uri
+import android.view.TextureView
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -22,8 +24,9 @@ import java.io.File
 
 /**
  * Wallpaper de vídeo em loop.
- * [contentKey] força novo ExoPlayer quando o ficheiro current.mp4 é substituído
- * (mesmo path, conteúdo diferente).
+ *
+ * Proporção: RESIZE_MODE_ZOOM = preenche o ecrã, mantém aspect ratio,
+ * corta bordas se preciso — **não estica** (não distorce).
  */
 @Composable
 fun VideoWallpaper(
@@ -47,12 +50,7 @@ fun VideoWallpaper(
 
     val player = remember(source, contentKey) {
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                /* minBufferMs */ 500,
-                /* maxBufferMs */ 1_500,
-                /* bufferForPlaybackMs */ 250,
-                /* bufferForPlaybackAfterRebufferMs */ 500,
-            )
+            .setBufferDurationsMs(500, 1_500, 250, 500)
             .setTargetBufferBytes(2 * 1024 * 1024)
             .build()
 
@@ -99,14 +97,34 @@ fun VideoWallpaper(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 useController = false
+                // ZOOM = center-crop: enche o ecrã sem distorcer
+                // (FIT deixaria faixas; FILL esticaria — evitar)
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                // TextureView respeita melhor o resizeMode que SurfaceView em alguns devices
+                setUseController(false)
+                try {
+                    videoSurfaceView?.let { /* keep default */ }
+                } catch (_: Exception) {
+                }
                 this.player = player
                 setBackgroundColor(0xFF0D1117.toInt())
                 setShutterBackgroundColor(0xFF0D1117.toInt())
+
+                player.addListener(object : Player.Listener {
+                    override fun onVideoSizeChanged(videoSize: VideoSize) {
+                        if (videoSize.width > 0 && videoSize.height > 0) {
+                            // Forçar recálculo do aspect ratio do frame
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                            requestLayout()
+                        }
+                    }
+                })
             }
         },
         update = { view ->
             if (view.player !== player) view.player = player
+            // Sempre reforçar: nunca FILL (esticado)
+            view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             try {
                 player.volume = if (soundEnabled) 1f else 0f
             } catch (_: Exception) {
