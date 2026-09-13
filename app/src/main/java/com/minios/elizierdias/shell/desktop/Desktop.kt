@@ -239,8 +239,7 @@ private fun WallpaperLayer(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clipToBounds()
-            .background(Color(0xFF0D1117)),
+            .clipToBounds(),
     ) {
         if (isVideo) {
             key(wallpaperUri, wallpaperVersion, videoSound) {
@@ -280,7 +279,7 @@ private fun WallpaperLayer(
                     model = model,
                     contentDescription = "Wallpaper",
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit,
+                    contentScale = ContentScale.Crop,
                 )
             }
         } else {
