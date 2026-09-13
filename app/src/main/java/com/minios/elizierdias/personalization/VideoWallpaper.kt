@@ -14,7 +14,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.VideoSize
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -22,17 +21,9 @@ import androidx.media3.ui.PlayerView
 import java.io.File
 
 /**
- * Wallpaper de vídeo em loop.
+ * Wallpaper de vídeo em loop — modo ZOOM (cover), sem barras pretas.
  *
- * Modo **ZOOM (cover)** — o que o utilizador pediu sem barras pretas:
- * - preenche 100% do ecrã (sem faixas)
- * - não estica / não distorce
- * - corta só o excesso nas bordas (inevitável se o ratio do vídeo ≠ ecrã)
- *
- * Ecrã tipico NoskOS: 1640x720 (~2.28:1). A maioria dos vídeos é 16:9;
- * por isso ZOOM corta um pouco em cima/baixo. É o trade-off correcto.
- *
- * Desempenho (4GB RAM): buffer moderado, max 1640x720 / 4 Mbps.
+ * Desempenho (4GB): max 1280x720 / 2.5 Mbps, buffers curtos.
  */
 @Composable
 fun VideoWallpaper(
@@ -40,8 +31,11 @@ fun VideoWallpaper(
     modifier: Modifier = Modifier,
     soundEnabled: Boolean = false,
     contentKey: Long = 0L,
+    enabled: Boolean = true,
 ) {
     val context = LocalContext.current
+
+    if (!enabled) return
 
     val mediaUri = remember(source, contentKey) {
         when {
@@ -56,8 +50,8 @@ fun VideoWallpaper(
 
     val player = remember(source, contentKey) {
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(400, 1_200, 200, 400)
-            .setTargetBufferBytes(2 * 1024 * 1024)
+            .setBufferDurationsMs(300, 900, 150, 300)
+            .setTargetBufferBytes(1 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
@@ -67,8 +61,8 @@ fun VideoWallpaper(
             .apply {
                 trackSelectionParameters = trackSelectionParameters
                     .buildUpon()
-                    .setMaxVideoSize(1640, 720)
-                    .setMaxVideoBitrate(4_000_000)
+                    .setMaxVideoSize(1280, 720)
+                    .setMaxVideoBitrate(2_500_000)
                     .build()
 
                 setMediaItem(MediaItem.fromUri(mediaUri))
@@ -110,7 +104,6 @@ fun VideoWallpaper(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 useController = false
-                // ZOOM = cover: ecrã cheio, sem barras, sem esticar
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                 this.player = player
                 val bg = 0xFF0D1117.toInt()
@@ -118,25 +111,17 @@ fun VideoWallpaper(
                 setShutterBackgroundColor(bg)
 
                 player.addListener(object : Player.Listener {
-                    override fun onVideoSizeChanged(videoSize: VideoSize) {
-                        if (videoSize.width > 0 && videoSize.height > 0) {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_READY) {
                             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                            requestLayout()
                         }
                     }
                 })
             }
         },
         update = { view ->
-            if (view.player !== player) view.player = player
+            view.player = player
             view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-            try {
-                player.volume = if (soundEnabled) 1f else 0f
-            } catch (_: Exception) {
-            }
-            if (!player.isPlaying && player.playbackState == Player.STATE_READY) {
-                player.play()
-            }
         },
     )
 }
