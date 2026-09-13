@@ -56,11 +56,12 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
 /**
- * Rato virtual:
- * - Arrastar = move SEM clicar
- * - Toque = clique
- * - L activo + arrastar = arrastar janelas
- * Cursor: seta preta
+ * Rato Linux (Viewer RFB) — modo toque absoluto (como ecrã tactil):
+ * - Onde tocas = onde o cursor vai (nao modo "trackpad")
+ * - Toque = clique esquerdo
+ * - Arrastar com dedo = arrastar com botao pressionado
+ * - Botao L = forcar botao esquerdo (arrastar janelas)
+ * Cursor: seta branca
  */
 @Composable
 fun RfbViewer(
@@ -176,7 +177,7 @@ fun RfbViewer(
             modifier = Modifier
                 .fillMaxSize()
                 .onSizeChanged { viewSize = it }
-                .pointerInput(active, client.fbWidth, client.fbHeight, viewSize, lmbHold) {
+                .pointerInput(active, client.fbWidth, client.fbHeight, lmbHold) {
                     if (!active || client.fbWidth <= 0) return@pointerInput
                     val fw = client.fbWidth.toFloat()
                     val fh = client.fbHeight.toFloat()
@@ -187,11 +188,14 @@ fun RfbViewer(
                         val scale = minOf(vw / fw, vh / fh)
                         val ox = (vw - fw * scale) / 2f
                         val oy = (vh - fh * scale) / 2f
-                        val fx = ((x - ox) / scale).toInt().coerceIn(0, (client.fbWidth - 1).coerceAtLeast(0))
-                        val fy = ((y - oy) / scale).toInt().coerceIn(0, (client.fbHeight - 1).coerceAtLeast(0))
+                        val fx = ((x - ox) / scale).toInt()
+                            .coerceIn(0, (client.fbWidth - 1).coerceAtLeast(0))
+                        val fy = ((y - oy) / scale).toInt()
+                            .coerceIn(0, (client.fbHeight - 1).coerceAtLeast(0))
                         return fx to fy
                     }
 
+                    // Toque = clique (absoluto: dedo = cursor)
                     detectTapGestures(
                         onTap = { offset ->
                             cursorX = offset.x
@@ -204,6 +208,15 @@ fun RfbViewer(
                             }
                         },
                         onDoubleTap = { openKeyboard() },
+                        onLongPress = { offset ->
+                            // clique direito
+                            cursorX = offset.x
+                            cursorY = offset.y
+                            cursorVisible = true
+                            val (fx, fy) = toFb(offset.x, offset.y)
+                            client.sendPointerEvent(fx, fy, 4)
+                            client.sendPointerEvent(fx, fy, 0)
+                        },
                     )
                 }
                 .pointerInput(active, client.fbWidth, client.fbHeight, lmbHold) {
@@ -217,25 +230,28 @@ fun RfbViewer(
                         val scale = minOf(vw / fw, vh / fh)
                         val ox = (vw - fw * scale) / 2f
                         val oy = (vh - fh * scale) / 2f
-                        val fx = ((x - ox) / scale).toInt().coerceIn(0, (client.fbWidth - 1).coerceAtLeast(0))
-                        val fy = ((y - oy) / scale).toInt().coerceIn(0, (client.fbHeight - 1).coerceAtLeast(0))
+                        val fx = ((x - ox) / scale).toInt()
+                            .coerceIn(0, (client.fbWidth - 1).coerceAtLeast(0))
+                        val fy = ((y - oy) / scale).toInt()
+                            .coerceIn(0, (client.fbHeight - 1).coerceAtLeast(0))
                         return fx to fy
                     }
 
+                    // Arrastar = mover com botao esquerdo pressionado (como rato normal)
                     detectDragGestures(
                         onDragStart = { offset ->
                             cursorX = offset.x
                             cursorY = offset.y
                             cursorVisible = true
                             val (fx, fy) = toFb(offset.x, offset.y)
-                            client.sendPointerEvent(fx, fy, if (lmbHold) 1 else 0)
+                            client.sendPointerEvent(fx, fy, 1)
                         },
                         onDrag = { change, _ ->
                             change.consume()
                             cursorX = change.position.x
                             cursorY = change.position.y
                             val (fx, fy) = toFb(change.position.x, change.position.y)
-                            client.sendPointerEvent(fx, fy, if (lmbHold) 1 else 0)
+                            client.sendPointerEvent(fx, fy, 1)
                         },
                         onDragEnd = {
                             val (fx, fy) = toFb(cursorX, cursorY)
@@ -272,12 +288,13 @@ fun RfbViewer(
                 )
             }
 
+            // Cursor branco — ponta no ponto do toque
             if (active && cursorVisible && cursorX >= 0f) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val cx = cursorX
                     val cy = cursorY
-                    val fill = if (lmbHold) Color(0xFF8B0000) else Color(0xFF111111)
-                    val edge = if (lmbHold) Color(0xFFFF6666) else Color(0xFFEEEEEE)
+                    val fill = if (lmbHold) Color(0xFFFFCCCC) else Color(0xFFFFFFFF)
+                    val edge = if (lmbHold) Color(0xFFFF4444) else Color(0xFF222222)
                     val path = Path().apply {
                         moveTo(cx, cy)
                         lineTo(cx + 14f, cy + 22f)
@@ -288,7 +305,7 @@ fun RfbViewer(
                         close()
                     }
                     drawPath(path, color = fill)
-                    drawPath(path, color = edge, style = Stroke(width = 1.2f))
+                    drawPath(path, color = edge, style = Stroke(width = 1.4f))
                 }
             }
         }
