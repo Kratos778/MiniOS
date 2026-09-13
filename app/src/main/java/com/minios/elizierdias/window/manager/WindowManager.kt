@@ -18,7 +18,6 @@ class WindowManager {
     private var nextZIndex = mutableStateOf(1)
     private var cascadeOffset = 0
 
-    /** Última área útil do Desktop (acima da taskbar). */
     private var desktopBounds = Size(1280f, 676f)
 
     private data class NormalGeometry(
@@ -34,10 +33,6 @@ class WindowManager {
         }
     }
 
-    /**
-     * Uma instância por app: se já existe (mesmo minimizada), foca/restaura.
-     * Evita “abrir Files e aparecer Settings” e múltiplas janelas iguais.
-     */
     fun openApp(app: MiniApp, desktopSize: Size): String {
         updateDesktopSize(desktopSize)
 
@@ -95,7 +90,20 @@ class WindowManager {
     fun move(instanceId: String, newPosition: Offset) {
         _windows.replaceInPlace { window ->
             if (window.instanceId != instanceId) return@replaceInPlace window
-            if (window.isMaximized) return@replaceInPlace window
+            // Se estava maximizada, desmaximiza e move
+            if (window.isMaximized) {
+                val saved = normalGeometry[instanceId]
+                val size = saved?.size ?: window.size
+                normalGeometry.remove(instanceId)
+                return@replaceInPlace window.copy(
+                    isMaximized = false,
+                    size = Size(
+                        size.width.coerceIn(MIN_WIDTH, desktopBounds.width),
+                        size.height.coerceIn(MIN_HEIGHT, desktopBounds.height),
+                    ),
+                    position = clampPosition(newPosition, size),
+                )
+            }
             window.copy(position = clampPosition(newPosition, window.size))
         }
     }
@@ -114,10 +122,19 @@ class WindowManager {
         }
     }
 
+    /** Minimiza de verdade: esconde e tira maximizado. */
     fun minimize(instanceId: String) {
+        val target = _windows.firstOrNull { it.instanceId == instanceId } ?: return
+        if (!target.isMaximized && instanceId !in normalGeometry) {
+            normalGeometry[instanceId] = NormalGeometry(target.position, target.size)
+        }
         _windows.replaceInPlace { window ->
             if (window.instanceId == instanceId) {
-                window.copy(isMinimized = true, isFocused = false)
+                window.copy(
+                    isMinimized = true,
+                    isFocused = false,
+                    isMaximized = false,
+                )
             } else {
                 window
             }
@@ -126,6 +143,22 @@ class WindowManager {
 
     fun restore(instanceId: String) {
         if (_windows.none { it.instanceId == instanceId }) return
+        // Restaurar geometria se estava maximizada ao minimizar
+        val saved = normalGeometry[instanceId]
+        if (saved != null) {
+            _windows.replaceInPlace { window ->
+                if (window.instanceId != instanceId) return@replaceInPlace window
+                window.copy(
+                    isMinimized = false,
+                    isMaximized = false,
+                    position = clampPosition(saved.position, saved.size),
+                    size = Size(
+                        saved.size.width.coerceIn(MIN_WIDTH, desktopBounds.width),
+                        saved.size.height.coerceIn(MIN_HEIGHT, desktopBounds.height),
+                    ),
+                )
+            }
+        }
         focus(instanceId)
     }
 
@@ -145,9 +178,10 @@ class WindowManager {
                             saved.size.height.coerceIn(MIN_HEIGHT, desktopBounds.height),
                         ),
                         isMaximized = false,
+                        isMinimized = false,
                     )
                 } else {
-                    window.copy(isMaximized = false)
+                    window.copy(isMaximized = false, isMinimized = false)
                 }
             }
             normalGeometry.remove(instanceId)
@@ -159,6 +193,7 @@ class WindowManager {
                     position = Offset.Zero,
                     size = desktopSize,
                     isMaximized = true,
+                    isMinimized = false,
                 )
             }
         }
