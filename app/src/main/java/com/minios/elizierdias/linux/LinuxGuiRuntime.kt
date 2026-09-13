@@ -56,11 +56,9 @@ class LinuxGuiRuntime(
     private fun vncDir(): File =
         File(rootHome(), ".vnc").also { it.mkdirs() }
 
-    /** Menu do botao direito Openbox — Terminal / Browser / Fechar. */
     private fun ensureOpenboxMenu() {
         val dir = File(rootHome(), ".config/openbox").also { it.mkdirs() }
-        val menu = File(dir, "menu.xml")
-        menu.writeText(
+        File(dir, "menu.xml").writeText(
             """
             |<?xml version="1.0" encoding="UTF-8"?>
             |<openbox_menu>
@@ -81,10 +79,8 @@ class LinuxGuiRuntime(
                 """
                 |<?xml version="1.0" encoding="UTF-8"?>
                 |<openbox_config>
-                |  <theme><name>Clearlooks</name></theme>
                 |  <keyboard>
                 |    <keybind key="A-F4"><action name="Close"/></keybind>
-                |    <keybind key="A-Tab"><action name="NextWindow"/></keybind>
                 |  </keyboard>
                 |  <mouse>
                 |    <context name="Desktop">
@@ -99,17 +95,38 @@ class LinuxGuiRuntime(
         }
     }
 
+    /** Script real no PATH — nao depende de heredoc no Terminal. */
+    private fun ensureStartVncScript(geo: String) {
+        val bin = File(LinuxConfig.rootfsDir(context), "usr/local/bin").also { it.mkdirs() }
+        val f = File(bin, "start-vnc")
+        f.writeText(
+            """
+            |#!/bin/sh
+            |export HOME=/root USER=root DISPLAY=:1
+            |GEO="${geo}"
+            |vncserver -kill :1 2>/dev/null || true
+            |rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 /root/.vnc/*.pid 2>/dev/null || true
+            |pkill -9 Xtigervnc 2>/dev/null || true
+            |pkill -9 Xvnc 2>/dev/null || true
+            |sleep 0.5
+            |vncserver :1 -geometry "\$GEO" -depth 24 -localhost yes -SecurityTypes None -xstartup /root/.vnc/xstartup
+            |vncserver -list
+            """.trimMargin(),
+        )
+        f.setExecutable(true, false)
+    }
+
     fun ensureXstartup(): String {
         val dir = vncDir()
         val startup = File(dir, "xstartup")
         ensureOpenboxMenu()
+        val geo = deviceGeometry()
+        ensureStartVncScript(geo)
         val script =
             "#!/bin/sh\n" +
                 "unset SESSION_MANAGER\n" +
                 "unset DBUS_SESSION_BUS_ADDRESS\n" +
-                "export DISPLAY=:1\n" +
-                "export HOME=/root\n" +
-                "export USER=root\n" +
+                "export DISPLAY=:1 HOME=/root USER=root\n" +
                 "mkdir -p /sdcard/MiniOS/Documents /sdcard/MiniOS/Downloads /sdcard/MiniOS/Games 2>/dev/null\n" +
                 "mkdir -p /root/Documents /root/Downloads /root/Desktop 2>/dev/null\n" +
                 "command -v xsetroot >/dev/null 2>&1 && xsetroot -solid '#1a2332'\n" +
@@ -123,23 +140,15 @@ class LinuxGuiRuntime(
         return startup.absolutePath
     }
 
-    fun ensureVncPasswd(): String {
-        val passwd = File(vncDir(), "passwd")
-        return passwd.absolutePath
-    }
+    fun ensureVncPasswd(): String = File(vncDir(), "passwd").absolutePath
 
     suspend fun ensurePersistentDirs(): Result<String> = withContext(Dispatchers.IO) {
         try {
             val cmd =
                 "mkdir -p /sdcard/MiniOS/Documents /sdcard/MiniOS/Downloads /sdcard/MiniOS/Games " +
-                    "/root/Documents /root/Downloads /root/Desktop 2>&1; " +
-                    "ln -sfn /sdcard/MiniOS/Documents /root/Documents/MiniOS 2>/dev/null || true; " +
-                    "ln -sfn /sdcard/MiniOS/Downloads /root/Downloads/MiniOS 2>/dev/null || true; " +
-                    "ln -sfn /sdcard/MiniOS/Games /root/Desktop/Games 2>/dev/null || true; " +
-                    "echo OK"
+                    "/root/Documents /root/Downloads /root/Desktop 2>&1; echo OK"
             val r = runtime.exec(cmd, timeoutSec = 20)
-            val body = r.getOrNull()?.stdout.orEmpty() + r.getOrNull()?.stderr.orEmpty()
-            Result.success(body.ifBlank { "Pastas persistentes OK" })
+            Result.success(r.getOrNull()?.stdout.orEmpty().ifBlank { "OK" })
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -154,58 +163,45 @@ class LinuxGuiRuntime(
     }
 
     private suspend fun cleanStaleLocks() {
+        // Reset duro — “already running” com lista vazia
         runtime.exec(
-            "rm -f /tmp/.X${displayNum}-lock /tmp/.X11-unix/X${displayNum} " +
-                "/root/.vnc/*.pid /root/.vnc/localhost:${displayNum}.pid 2>/dev/null || true",
-            timeoutSec = 10,
+            "vncserver -kill :1 2>/dev/null; " +
+                "pkill -9 -f Xtigervnc 2>/dev/null; " +
+                "pkill -9 -f 'Xvnc :1' 2>/dev/null; " +
+                "rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 " +
+                "/root/.vnc/*.pid /root/.vnc/localhost:1.pid " +
+                "/tmp/.X11-unix/X1 2>/dev/null; " +
+                "sleep 0.3; echo cleaned",
+            timeoutSec = 20,
         )
-        runtime.exec("vncserver -kill $displayName 2>/dev/null || true", timeoutSec = 15)
     }
 
     suspend fun ensureGuiPackages(onProgress: ((String) -> Unit)? = null): Result<String> =
         withContext(Dispatchers.IO) {
             try {
                 if (!runtime.isRootFsReady() || !runtime.isProotInstalled()) {
-                    return@withContext Result.failure(
-                        IllegalStateException("RootFS/PRoot nao pronto"),
-                    )
+                    return@withContext Result.failure(IllegalStateException("RootFS/PRoot nao pronto"))
                 }
                 onProgress?.invoke("[GUI] A verificar pacotes...")
                 if (isVncInstalled()) {
-                    onProgress?.invoke("[GUI] TigerVNC ja instalado")
                     ensurePersistentDirs()
+                    ensureXstartup()
                     return@withContext Result.success("[GUI] TigerVNC ja instalado")
                 }
-
                 runtime.ensureDns()
-                onProgress?.invoke("[GUI] apt update + instalar tigervnc openbox xterm...")
-
                 val pkgs =
                     "tigervnc-standalone-server tigervnc-common openbox xterm x11-xserver-utils"
-                runtime.exec(
-                    "DEBIAN_FRONTEND=noninteractive apt-get update -y",
-                    timeoutSec = 300,
-                )
+                runtime.exec("DEBIAN_FRONTEND=noninteractive apt-get update -y", timeoutSec = 300)
                 val install = runtime.exec(
                     "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $pkgs",
                     timeoutSec = 600,
                 )
-
-                val body = buildString {
-                    install.getOrNull()?.let {
-                        if (it.stdout.isNotBlank()) appendLine(it.stdout.takeLast(800))
-                        if (it.stderr.isNotBlank()) appendLine(it.stderr.takeLast(400))
-                    }
-                    install.exceptionOrNull()?.let { appendLine(it.message) }
-                }.trim()
-
                 ensurePersistentDirs()
-
+                ensureXstartup()
                 if (isVncInstalled()) {
-                    onProgress?.invoke("[GUI] OK")
-                    Result.success("[GUI] Pacotes OK\n$body")
+                    Result.success("[GUI] Pacotes OK")
                 } else {
-                    Result.failure(IllegalStateException("Falha GUI.\n$body"))
+                    Result.failure(IllegalStateException("Falha GUI: ${install.exceptionOrNull()?.message}"))
                 }
             } catch (e: Exception) {
                 Result.failure(e)
@@ -217,24 +213,18 @@ class LinuxGuiRuntime(
             try {
                 onProgress?.invoke("[GUI] A instalar Falkon...")
                 runtime.ensureDns()
-                val r = runtime.exec(
+                runtime.exec(
                     "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends falkon",
                     timeoutSec = 600,
                 )
-                val body = buildString {
-                    r.getOrNull()?.let {
-                        if (it.stdout.isNotBlank()) appendLine(it.stdout.takeLast(800))
-                        if (it.stderr.isNotBlank()) appendLine(it.stderr.takeLast(400))
-                    }
-                }.trim()
                 val check = runtime.exec(
                     "command -v falkon >/dev/null 2>&1 && echo YES || echo NO",
                     timeoutSec = 10,
                 )
                 if (check.getOrNull()?.stdout?.trim() == "YES") {
-                    Result.success("[GUI] Falkon OK\n$body")
+                    Result.success("[GUI] Falkon OK")
                 } else {
-                    Result.failure(IllegalStateException("Falkon falhou.\n$body"))
+                    Result.failure(IllegalStateException("Falkon falhou"))
                 }
             } catch (e: Exception) {
                 Result.failure(e)
@@ -252,9 +242,8 @@ class LinuxGuiRuntime(
         val r = runtime.exec("vncserver -list 2>/dev/null || true", timeoutSec = 15)
         val out = r.getOrNull()?.stdout.orEmpty()
         val hasStale = out.contains("stale", ignoreCase = true)
-        val hasDisplay = out.contains(":$displayNum") || out.lines().any {
-            it.trim().startsWith("$displayNum") || it.contains(" $displayNum\t")
-        }
+        val hasDisplay = Regex("""(?m)^\s*1\s+""").containsMatchIn(out) ||
+            out.contains(":$displayNum")
         val running = hasDisplay && !hasStale
         GuiStatus(
             running = running,
@@ -262,7 +251,8 @@ class LinuxGuiRuntime(
             port = vncPort,
             geometry = geo,
             message = when {
-                hasStale -> "VNC stale — Iniciar"
+                hasStale || (out.contains("already") && !hasDisplay) ->
+                    "VNC stale — toca Iniciar"
                 running -> "VNC ativo $displayName ($vncPort)"
                 else -> "VNC parado"
             },
@@ -280,23 +270,19 @@ class LinuxGuiRuntime(
                         IllegalStateException("vncserver nao encontrado. Pacotes primeiro."),
                     )
                 }
-
                 runtime.ensureDns()
                 ensurePersistentDirs()
                 ensureXstartup()
                 ensureVncPasswd()
                 cleanStaleLocks()
                 val geo = geometry ?: deviceGeometry()
+                ensureStartVncScript(geo)
 
-                val cmd = buildString {
-                    append("export HOME=/root USER=root; ")
-                    append("vncserver $displayName ")
-                    append("-geometry $geo -depth 24 ")
-                    append("-localhost yes ")
-                    append("-SecurityTypes None ")
-                    append("-xstartup /root/.vnc/xstartup ")
-                    append("2>&1")
-                }
+                val cmd =
+                    "export HOME=/root USER=root; " +
+                        "vncserver $displayName -geometry $geo -depth 24 " +
+                        "-localhost yes -SecurityTypes None " +
+                        "-xstartup /root/.vnc/xstartup 2>&1"
                 val r = runtime.exec(cmd, timeoutSec = 60)
                 val body = buildString {
                     r.getOrNull()?.let {
@@ -305,15 +291,24 @@ class LinuxGuiRuntime(
                     }
                 }.trim()
 
-                Thread.sleep(1000)
-
+                Thread.sleep(1200)
                 val st = status()
                 if (st.running || body.contains("New") || body.contains("on port")) {
                     Result.success(
-                        st.copy(running = true, geometry = geo, message = "VNC $displayName $geo\n$body"),
+                        st.copy(running = true, geometry = geo, message = "VNC OK $geo\n$body"),
                     )
                 } else {
-                    Result.failure(IllegalStateException("Falha VNC:\n$body"))
+                    // segunda tentativa apos limpeza
+                    cleanStaleLocks()
+                    val r2 = runtime.exec(cmd, timeoutSec = 60)
+                    val body2 = r2.getOrNull()?.stdout.orEmpty()
+                    Thread.sleep(1000)
+                    val st2 = status()
+                    if (st2.running || body2.contains("New") || body2.contains("on port")) {
+                        Result.success(st2.copy(running = true, geometry = geo, message = body2))
+                    } else {
+                        Result.failure(IllegalStateException("Falha VNC:\n$body\n$body2"))
+                    }
                 }
             } catch (e: Exception) {
                 Result.failure(e)
@@ -323,9 +318,7 @@ class LinuxGuiRuntime(
     suspend fun stop(): Result<String> = withContext(Dispatchers.IO) {
         try {
             cleanStaleLocks()
-            val r = runtime.exec("vncserver -kill $displayName 2>&1 || true", timeoutSec = 20)
-            val body = r.getOrNull()?.stdout.orEmpty() + r.getOrNull()?.stderr.orEmpty()
-            Result.success(body.ifBlank { "VNC parado" })
+            Result.success("VNC parado")
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -335,22 +328,18 @@ class LinuxGuiRuntime(
         try {
             val st = status()
             if (!st.running) {
-                return@withContext Result.failure(IllegalStateException("VNC nao activo"))
+                return@withContext Result.failure(IllegalStateException("VNC nao activo — Iniciar primeiro"))
             }
             val safe = command.trim()
             if (safe.isEmpty() || safe.length > 300) {
                 return@withContext Result.failure(IllegalStateException("Comando invalido"))
             }
             val cmd =
-                "export DISPLAY=$displayName HOME=/root USER=root; " +
-                    "nohup $safe >/tmp/noskos-app.log 2>&1 & echo PID:$!"
-            val r = runtime.exec(cmd, timeoutSec = 20)
-            val body = buildString {
-                r.getOrNull()?.let {
-                    if (it.stdout.isNotBlank()) appendLine(it.stdout)
-                    if (it.stderr.isNotBlank()) appendLine(it.stderr)
-                }
-            }.trim()
+                "export DISPLAY=:1 HOME=/root USER=root; " +
+                    "nohup $safe >/tmp/noskos-app.log 2>&1 & echo PID:\$!; sleep 0.5; " +
+                    "tail -5 /tmp/noskos-app.log 2>/dev/null || true"
+            val r = runtime.exec(cmd, timeoutSec = 25)
+            val body = r.getOrNull()?.stdout.orEmpty() + r.getOrNull()?.stderr.orEmpty()
             Result.success("Lancado: $safe\n$body")
         } catch (e: Exception) {
             Result.failure(e)
@@ -358,10 +347,11 @@ class LinuxGuiRuntime(
     }
 
     suspend fun fixDbusStatoverride(): Result<String> = withContext(Dispatchers.IO) {
-        val cmd =
-            "mkdir -p /var/lib/dpkg; touch /var/lib/dpkg/statoverride 2>/dev/null || true; " +
-                "DEBIAN_FRONTEND=noninteractive dpkg --configure -a 2>&1 || true; echo DONE"
-        val r = runtime.exec(cmd, timeoutSec = 120)
+        val r = runtime.exec(
+            "mkdir -p /var/lib/dpkg; touch /var/lib/dpkg/statoverride; " +
+                "DEBIAN_FRONTEND=noninteractive dpkg --configure -a 2>&1 || true; echo DONE",
+            timeoutSec = 120,
+        )
         Result.success(r.getOrNull()?.stdout.orEmpty())
     }
 }
