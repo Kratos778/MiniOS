@@ -39,6 +39,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -55,10 +56,11 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
 /**
- * Rato virtual (como shell NoskOS):
- * - Arrastar = move cursor SEM clicar
- * - Toque = clique esquerdo
- * - Botao L activo + arrastar = arrastar janelas (botao esquerdo premido)
+ * Rato virtual:
+ * - Arrastar = move SEM clicar
+ * - Toque = clique
+ * - L activo + arrastar = arrastar janelas
+ * Cursor: seta preta
  */
 @Composable
 fun RfbViewer(
@@ -98,16 +100,27 @@ fun RfbViewer(
     fun sendChar(ch: Char) {
         when (ch) {
             '\n' -> tapKey(0xff0d)
+            '\t' -> tapKey(0xff09)
             ' ' -> tapKey(0x20)
             else -> {
                 val code = ch.code
-                if (code in 0x20..0xFF) tapKey(code)
+                if (code in 0x20..0xFF) {
+                    tapKey(code)
+                } else if (code in 0x100..0xFFFD) {
+                    tapKey(0x01000000 or code)
+                }
             }
         }
     }
 
     fun openKeyboard() {
         try {
+            if (client.state == RfbClient.State.CONNECTED && client.fbWidth > 0) {
+                val fx = client.fbWidth / 2
+                val fy = (client.fbHeight * 2) / 3
+                client.sendPointerEvent(fx, fy, 1)
+                client.sendPointerEvent(fx, fy, 0)
+            }
             focusRequester.requestFocus()
             keyboard?.show()
         } catch (_: Exception) {
@@ -185,11 +198,8 @@ fun RfbViewer(
                             cursorY = offset.y
                             cursorVisible = true
                             val (fx, fy) = toFb(offset.x, offset.y)
-                            if (lmbHold) {
-                                // so move
-                                client.sendPointerEvent(fx, fy, 1)
-                            } else {
-                                client.sendPointerEvent(fx, fy, 1)
+                            client.sendPointerEvent(fx, fy, 1)
+                            if (!lmbHold) {
                                 client.sendPointerEvent(fx, fy, 0)
                             }
                         },
@@ -218,25 +228,18 @@ fun RfbViewer(
                             cursorY = offset.y
                             cursorVisible = true
                             val (fx, fy) = toFb(offset.x, offset.y)
-                            val mask = if (lmbHold) 1 else 0
-                            client.sendPointerEvent(fx, fy, mask)
+                            client.sendPointerEvent(fx, fy, if (lmbHold) 1 else 0)
                         },
                         onDrag = { change, _ ->
                             change.consume()
                             cursorX = change.position.x
                             cursorY = change.position.y
                             val (fx, fy) = toFb(change.position.x, change.position.y)
-                            val mask = if (lmbHold) 1 else 0
-                            client.sendPointerEvent(fx, fy, mask)
+                            client.sendPointerEvent(fx, fy, if (lmbHold) 1 else 0)
                         },
                         onDragEnd = {
                             val (fx, fy) = toFb(cursorX, cursorY)
-                            if (lmbHold) {
-                                // mantem botao se L activo — so envia posicao
-                                client.sendPointerEvent(fx, fy, 1)
-                            } else {
-                                client.sendPointerEvent(fx, fy, 0)
-                            }
+                            client.sendPointerEvent(fx, fy, if (lmbHold) 1 else 0)
                         },
                         onDragCancel = {
                             val (fx, fy) = toFb(cursorX, cursorY)
@@ -273,25 +276,19 @@ fun RfbViewer(
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val cx = cursorX
                     val cy = cursorY
-                    val r = 12f
-                    drawCircle(
-                        color = if (lmbHold) Color(0xEEF85149) else Color(0xEE58A6FF),
-                        radius = r,
-                        center = Offset(cx, cy),
-                        style = Stroke(width = 2.5f),
-                    )
-                    drawLine(
-                        if (lmbHold) Color(0xEEF85149) else Color(0xEE58A6FF),
-                        Offset(cx - r - 5f, cy),
-                        Offset(cx + r + 5f, cy),
-                        strokeWidth = 1.5f,
-                    )
-                    drawLine(
-                        if (lmbHold) Color(0xEEF85149) else Color(0xEE58A6FF),
-                        Offset(cx, cy - r - 5f),
-                        Offset(cx, cy + r + 5f),
-                        strokeWidth = 1.5f,
-                    )
+                    val fill = if (lmbHold) Color(0xFF8B0000) else Color(0xFF111111)
+                    val edge = if (lmbHold) Color(0xFFFF6666) else Color(0xFFEEEEEE)
+                    val path = Path().apply {
+                        moveTo(cx, cy)
+                        lineTo(cx + 14f, cy + 22f)
+                        lineTo(cx + 6f, cy + 20f)
+                        lineTo(cx + 10f, cy + 32f)
+                        lineTo(cx + 4f, cy + 34f)
+                        lineTo(cx, cy + 22f)
+                        close()
+                    }
+                    drawPath(path, color = fill)
+                    drawPath(path, color = edge, style = Stroke(width = 1.2f))
                 }
             }
         }
@@ -335,7 +332,6 @@ fun RfbViewer(
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // L = botao esquerdo do rato (segurar para arrastar janelas)
                     Text(
                         text = if (lmbHold) "L●" else "L",
                         color = if (lmbHold) Color(0xFFF85149) else Color(0xFFC9D1D9),
@@ -348,10 +344,9 @@ fun RfbViewer(
                             )
                             .clickable {
                                 lmbHold = !lmbHold
-                                if (!lmbHold && cursorX >= 0f) {
-                                    // soltar botao ao desligar L
-                                    val fw = client.fbWidth.toFloat().coerceAtLeast(1f)
-                                    val fh = client.fbHeight.toFloat().coerceAtLeast(1f)
+                                if (!lmbHold && cursorX >= 0f && client.fbWidth > 0) {
+                                    val fw = client.fbWidth.toFloat()
+                                    val fh = client.fbHeight.toFloat()
                                     val vw = viewSize.width.toFloat().coerceAtLeast(1f)
                                     val vh = viewSize.height.toFloat().coerceAtLeast(1f)
                                     val scale = minOf(vw / fw, vh / fh)
@@ -438,39 +433,18 @@ private fun SpecialKeysPanel(
             )
             val keys = if (gamerMode) {
                 listOf(
-                    "Tab" to 0xff09,
-                    "Esc" to 0xff1b,
-                    "↑" to 0xff52,
-                    "↓" to 0xff54,
-                    "←" to 0xff51,
-                    "→" to 0xff53,
-                    "Ctrl" to 0xffe3,
-                    "Alt" to 0xffe9,
-                    "Spc" to 0x20,
+                    "Tab" to 0xff09, "Esc" to 0xff1b,
+                    "↑" to 0xff52, "↓" to 0xff54, "←" to 0xff51, "→" to 0xff53,
+                    "Ctrl" to 0xffe3, "Alt" to 0xffe9, "Spc" to 0x20,
                 )
             } else {
                 listOf(
-                    "Tab" to 0xff09,
-                    "Esc" to 0xff1b,
-                    "⇧" to 0xffe1,
-                    "Ctrl" to 0xffe3,
-                    "Alt" to 0xffe9,
-                    "↑" to 0xff52,
-                    "↓" to 0xff54,
-                    "←" to 0xff51,
-                    "→" to 0xff53,
-                    "F1" to 0xffbe,
-                    "F2" to 0xffbf,
-                    "F3" to 0xffc0,
-                    "F4" to 0xffc1,
-                    "F5" to 0xffc2,
-                    "F6" to 0xffc3,
-                    "F7" to 0xffc4,
-                    "F8" to 0xffc5,
-                    "F9" to 0xffc6,
-                    "F10" to 0xffc7,
-                    "F11" to 0xffc8,
-                    "F12" to 0xffc9,
+                    "Tab" to 0xff09, "Esc" to 0xff1b, "⇧" to 0xffe1,
+                    "Ctrl" to 0xffe3, "Alt" to 0xffe9,
+                    "↑" to 0xff52, "↓" to 0xff54, "←" to 0xff51, "→" to 0xff53,
+                    "F1" to 0xffbe, "F2" to 0xffbf, "F3" to 0xffc0, "F4" to 0xffc1,
+                    "F5" to 0xffc2, "F6" to 0xffc3, "F7" to 0xffc4, "F8" to 0xffc5,
+                    "F9" to 0xffc6, "F10" to 0xffc7, "F11" to 0xffc8, "F12" to 0xffc9,
                 )
             }
             keys.forEach { (label, sym) ->
