@@ -56,10 +56,53 @@ class LinuxGuiRuntime(
     private fun vncDir(): File =
         File(rootHome(), ".vnc").also { it.mkdirs() }
 
+    /** Menu do botao direito Openbox — Terminal / Browser / Fechar. */
+    private fun ensureOpenboxMenu() {
+        val dir = File(rootHome(), ".config/openbox").also { it.mkdirs() }
+        val menu = File(dir, "menu.xml")
+        menu.writeText(
+            """
+            |<?xml version="1.0" encoding="UTF-8"?>
+            |<openbox_menu>
+            |<menu id="root-menu" label="NoskOS">
+            |  <item label="Terminal"><action name="Execute"><command>xterm -geometry 200x45 -ls</command></action></item>
+            |  <item label="Browser Falkon"><action name="Execute"><command>falkon</command></action></item>
+            |  <item label="Files"><action name="Execute"><command>pcmanfm</command></action></item>
+            |  <separator/>
+            |  <item label="Reconfigure"><action name="Reconfigure"/></item>
+            |  <item label="Exit Openbox"><action name="Exit"/></item>
+            |</menu>
+            |</openbox_menu>
+            """.trimMargin(),
+        )
+        val rc = File(dir, "rc.xml")
+        if (!rc.exists()) {
+            rc.writeText(
+                """
+                |<?xml version="1.0" encoding="UTF-8"?>
+                |<openbox_config>
+                |  <theme><name>Clearlooks</name></theme>
+                |  <keyboard>
+                |    <keybind key="A-F4"><action name="Close"/></keybind>
+                |    <keybind key="A-Tab"><action name="NextWindow"/></keybind>
+                |  </keyboard>
+                |  <mouse>
+                |    <context name="Desktop">
+                |      <mousebind button="Right" action="Press">
+                |        <action name="ShowMenu"><menu>root-menu</menu></action>
+                |      </mousebind>
+                |    </context>
+                |  </mouse>
+                |</openbox_config>
+                """.trimMargin(),
+            )
+        }
+    }
+
     fun ensureXstartup(): String {
         val dir = vncDir()
         val startup = File(dir, "xstartup")
-        // xterm grande (quase ecrã 1640x720)
+        ensureOpenboxMenu()
         val script =
             "#!/bin/sh\n" +
                 "unset SESSION_MANAGER\n" +
@@ -71,7 +114,7 @@ class LinuxGuiRuntime(
                 "mkdir -p /root/Documents /root/Downloads /root/Desktop 2>/dev/null\n" +
                 "command -v xsetroot >/dev/null 2>&1 && xsetroot -solid '#1a2332'\n" +
                 "command -v openbox >/dev/null 2>&1 && openbox &\n" +
-                "sleep 0.4\n" +
+                "sleep 0.5\n" +
                 "command -v xterm >/dev/null 2>&1 && " +
                 "xterm -geometry 200x45+0+0 -fa Monospace -fs 12 -bg black -fg grey -ls -title NoskOS &\n" +
                 "wait\n"
