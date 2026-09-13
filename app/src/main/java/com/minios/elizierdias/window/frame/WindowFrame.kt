@@ -60,8 +60,7 @@ fun WindowFrame(
 
     var dragPos by remember(window.instanceId) { mutableStateOf(window.position) }
 
-    // IMPORTANTE: content() está SEMPRE no mesmo sítio da árvore Compose.
-    // Minimizar só esconde a moldura (size 0) — não remonta Files/Terminal/etc.
+    // Minimizada = size 0 (invisivel, content mantido na arvore)
     val frameModifier = if (window.isMinimized) {
         Modifier.size(0.dp)
     } else {
@@ -102,8 +101,8 @@ fun WindowFrame(
                         .background(
                             if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128),
                         )
-                        .pointerInput(window.instanceId, window.isMaximized) {
-                            if (window.isMaximized) return@pointerInput
+                        .pointerInput(window.instanceId, window.isMaximized, window.position) {
+                            // Arrastar barra de titulo: se maximizada, move() desmaximiza
                             detectDragGestures(
                                 onDragStart = {
                                     onFocus()
@@ -147,8 +146,8 @@ fun WindowFrame(
                     IconButton(onClick = onToggleMaximize, modifier = Modifier.size(28.dp)) {
                         Icon(
                             Icons.Filled.CropSquare,
-                            "Maximize",
-                            tint = Color(0xFF8B949E),
+                            if (window.isMaximized) "Restore" else "Maximize",
+                            tint = if (window.isMaximized) Color(0xFF58A6FF) else Color(0xFF8B949E),
                             modifier = Modifier.size(14.dp),
                         )
                     }
@@ -163,7 +162,6 @@ fun WindowFrame(
                 }
             }
 
-            // Mesmo slot Compose sempre — estado sobrevive ao minimizar
             Box(
                 modifier = if (window.isMinimized) {
                     Modifier.size(0.dp)
