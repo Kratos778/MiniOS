@@ -31,6 +31,10 @@ class LinuxGuiRuntime(
     val vncPort: Int get() = 5900 + displayNum
     val displayName: String get() = ":$displayNum"
 
+    /**
+     * Fase A: cap 1280x720 — menos RAM no telemovel 4GB.
+     * Nao usa resolucao nativa 1640x720.
+     */
     fun deviceGeometry(): String {
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
@@ -43,8 +47,19 @@ class LinuxGuiRuntime(
             w = h
             h = t
         }
-        w = w.coerceIn(800, 1920)
-        h = h.coerceIn(480, 1200)
+        // Cap para estabilidade (Raw RFB)
+        if (w > 1280) {
+            val scale = 1280f / w
+            w = 1280
+            h = (h * scale).toInt()
+        }
+        if (h > 720) {
+            val scale = 720f / h
+            h = 720
+            w = (w * scale).toInt()
+        }
+        w = w.coerceIn(800, 1280)
+        h = h.coerceIn(480, 720)
         w -= w % 2
         h -= h % 2
         return "${w}x${h}"
@@ -63,9 +78,9 @@ class LinuxGuiRuntime(
             |<?xml version="1.0" encoding="UTF-8"?>
             |<openbox_menu>
             |<menu id="root-menu" label="NoskOS">
-            |  <item label="Terminal"><action name="Execute"><command>xterm -geometry 200x45 -ls</command></action></item>
-            |  <item label="Browser Falkon"><action name="Execute"><command>falkon</command></action></item>
-            |  <item label="Files"><action name="Execute"><command>pcmanfm</command></action></item>
+            |  <item label="Terminal"><action name="Execute"><command>xterm -geometry 160x40 -ls</command></action></item>
+            |  <item label="Browser Dillo"><action name="Execute"><command>dillo</command></action></item>
+            |  <item label="Browser Links"><action name="Execute"><command>links2 -g</command></action></item>
             |  <separator/>
             |  <item label="Reconfigure"><action name="Reconfigure"/></item>
             |  <item label="Exit Openbox"><action name="Exit"/></item>
@@ -95,11 +110,9 @@ class LinuxGuiRuntime(
         }
     }
 
-    /** Script real no PATH — geometria embutida (sem var shell GEO). */
     private fun ensureStartVncScript(geo: String) {
         val bin = File(LinuxConfig.rootfsDir(context), "usr/local/bin").also { it.mkdirs() }
         val f = File(bin, "start-vnc")
-        // geo ja interpolado em Kotlin — nao usar \$GEO (raw string nao escapa $)
         f.writeText(
             """
             |#!/bin/sh
@@ -129,11 +142,11 @@ class LinuxGuiRuntime(
                 "export DISPLAY=:1 HOME=/root USER=root\n" +
                 "mkdir -p /sdcard/MiniOS/Documents /sdcard/MiniOS/Downloads /sdcard/MiniOS/Games 2>/dev/null\n" +
                 "mkdir -p /root/Documents /root/Downloads /root/Desktop 2>/dev/null\n" +
-                "command -v xsetroot >/dev/null 2>&1 && xsetroot -solid '#1a2332'\n" +
+                "command -v xsetroot >/dev/null 2>&1 && xsetroot -solid '#0d1117'\n" +
                 "command -v openbox >/dev/null 2>&1 && openbox &\n" +
-                "sleep 0.5\n" +
+                "sleep 0.4\n" +
                 "command -v xterm >/dev/null 2>&1 && " +
-                "xterm -geometry 200x45+0+0 -fa Monospace -fs 12 -bg black -fg grey -ls -title NoskOS &\n" +
+                "xterm -geometry 160x40+20+20 -fa Monospace -fs 11 -bg black -fg grey -ls -title NoskOS &\n" +
                 "wait\n"
         startup.writeText(script)
         startup.setExecutable(true, false)
@@ -206,28 +219,37 @@ class LinuxGuiRuntime(
             }
         }
 
+    /** Browser leve — dillo (preferido) ou links2. Sem Falkon/Qt. */
     suspend fun ensureLightBrowser(onProgress: ((String) -> Unit)? = null): Result<String> =
         withContext(Dispatchers.IO) {
             try {
-                onProgress?.invoke("[GUI] A instalar Falkon...")
+                onProgress?.invoke("[GUI] A instalar dillo (browser leve)...")
                 runtime.ensureDns()
                 runtime.exec(
-                    "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends falkon",
+                    "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends dillo links2",
                     timeoutSec = 600,
                 )
                 val check = runtime.exec(
-                    "command -v falkon >/dev/null 2>&1 && echo YES || echo NO",
+                    "command -v dillo >/dev/null 2>&1 && echo DILLO || " +
+                        "(command -v links2 >/dev/null 2>&1 && echo LINKS || echo NO)",
                     timeoutSec = 10,
                 )
-                if (check.getOrNull()?.stdout?.trim() == "YES") {
-                    Result.success("[GUI] Falkon OK")
-                } else {
-                    Result.failure(IllegalStateException("Falkon falhou"))
+                val which = check.getOrNull()?.stdout?.trim().orEmpty()
+                when {
+                    which.contains("DILLO") -> Result.success("[GUI] Dillo OK")
+                    which.contains("LINKS") -> Result.success("[GUI] Links2 OK")
+                    else -> Result.failure(IllegalStateException("Browser leve falhou"))
                 }
             } catch (e: Exception) {
                 Result.failure(e)
             }
         }
+
+    /** Comando para lancar browser leve instalado. */
+    fun lightBrowserCommand(): String =
+        "sh -c 'command -v dillo >/dev/null && exec dillo || " +
+            "command -v links2 >/dev/null && exec links2 -g || " +
+            "echo NO_BROWSER'"
 
     suspend fun status(): GuiStatus = withContext(Dispatchers.IO) {
         val geo = deviceGeometry()
