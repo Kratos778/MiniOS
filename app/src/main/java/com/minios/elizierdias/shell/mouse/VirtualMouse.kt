@@ -30,11 +30,14 @@ import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
 
 /**
- * Rato virtual — estável (sem long-press que crashava).
+ * Rato virtual.
+ *
+ * IMPORTANTE: o modifier deve ter padding bottom = altura da taskbar
+ * para NAO bloquear toques na taskbar / menu Iniciar na barra.
  *
  * - Arrastar: move o cursor
- * - Toque: clique na posição do cursor
- * - Mover janela: Mouse OFF → arrastar a barra de título com o dedo
+ * - Toque: clique na posicao do cursor
+ * - Mouse OFF: dedo directo nas janelas/taskbar
  */
 @Composable
 fun VirtualMouse(
@@ -86,9 +89,8 @@ fun VirtualMouse(
             try {
                 clickAtCursor()
             } catch (_: Exception) {
-                // nunca crashar a Activity por causa do clique virtual
             }
-            delay(32)
+            delay(40)
             pendingClick = false
             captureTouches = true
         }
@@ -105,7 +107,7 @@ fun VirtualMouse(
                 maxY = coords.size.height.toFloat().coerceAtLeast(1f)
                 if (!initialized && coords.size.width > 0) {
                     cursorX = maxX * 0.5f
-                    cursorY = maxY * 0.5f
+                    cursorY = maxY * 0.4f
                     initialized = true
                 }
             }
@@ -136,7 +138,6 @@ fun VirtualMouse(
                                     pendingClick = true
                                     captureTouches = false
                                 },
-                                // long-press DESATIVADO — injectar HOLD crashava a app
                             )
                         }
                 } else {
