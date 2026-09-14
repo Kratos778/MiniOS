@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.minios.elizierdias.core.NoskKeepAliveService
 import com.minios.elizierdias.shell.desktop.Desktop
 import com.minios.elizierdias.ui.theme.MiniOSTheme
 
@@ -46,6 +47,7 @@ class MainActivity : ComponentActivity() {
 
         maybeRequestHomeRole()
         maybeRequestIgnoreBatteryOptimizations()
+        NoskKeepAliveService.start(this)
 
         setContent {
             MiniOSTheme {
@@ -117,10 +119,6 @@ class MainActivity : ComponentActivity() {
         if (hasFocus) hideSystemBars()
     }
 
-    /**
-     * Quando o sistema aperta memoria, nao deixar matar de imediato sem
-     * libertar o que for seguro (caches). Nao para o Linux sozinho aqui.
-     */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         when (level) {
