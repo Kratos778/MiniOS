@@ -82,10 +82,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Em telemoveis 4GB o Android mata o NoskOS muito depressa se a bateria
-     * estiver a "optimizar" a app. Pedimos exclusao uma vez.
-     */
     private fun maybeRequestIgnoreBatteryOptimizations() {
         try {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
@@ -105,9 +101,7 @@ class MainActivity : ComponentActivity() {
             prefs.edit().putBoolean("battery_prompt_done", true).apply()
         } catch (_: Exception) {
             try {
-                startActivity(
-                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
-                )
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
             } catch (_: Exception) {
             }
         }
@@ -121,6 +115,25 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) hideSystemBars()
+    }
+
+    /**
+     * Quando o sistema aperta memoria, nao deixar matar de imediato sem
+     * libertar o que for seguro (caches). Nao para o Linux sozinho aqui.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        when (level) {
+            TRIM_MEMORY_RUNNING_CRITICAL,
+            TRIM_MEMORY_COMPLETE,
+            TRIM_MEMORY_MODERATE,
+            -> {
+                try {
+                    System.gc()
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 
     private fun hideSystemBars() {

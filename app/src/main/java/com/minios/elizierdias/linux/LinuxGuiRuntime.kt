@@ -31,10 +31,6 @@ class LinuxGuiRuntime(
     val vncPort: Int get() = 5900 + displayNum
     val displayName: String get() = ":$displayNum"
 
-    /**
-     * Fase A: cap 1280x720 — menos RAM no telemovel 4GB.
-     * Nao usa resolucao nativa 1640x720.
-     */
     fun deviceGeometry(): String {
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
@@ -47,7 +43,6 @@ class LinuxGuiRuntime(
             w = h
             h = t
         }
-        // Cap para estabilidade (Raw RFB)
         if (w > 1280) {
             val scale = 1280f / w
             w = 1280
@@ -118,11 +113,15 @@ class LinuxGuiRuntime(
             |#!/bin/sh
             |export HOME=/root USER=root DISPLAY=:1
             |vncserver -kill :1 2>/dev/null || true
-            |rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 /root/.vnc/*.pid 2>/dev/null || true
-            |pkill -9 Xtigervnc 2>/dev/null || true
-            |pkill -9 Xvnc 2>/dev/null || true
-            |sleep 0.5
+            |pkill -9 -f Xtigervnc 2>/dev/null || true
+            |pkill -9 -f Xvnc 2>/dev/null || true
+            |pkill -9 -f Xtigervnc 2>/dev/null || true
+            |rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 \
+            |  /root/.vnc/*.pid /root/.vnc/localhost:1.pid \
+            |  /tmp/.X11-unix/X1 2>/dev/null || true
+            |sleep 1
             |vncserver :1 -geometry $geo -depth 24 -localhost yes -SecurityTypes None -xstartup /root/.vnc/xstartup
+            |sleep 0.5
             |vncserver -list
             """.trimMargin(),
         )
@@ -144,7 +143,7 @@ class LinuxGuiRuntime(
                 "mkdir -p /root/Documents /root/Downloads /root/Desktop 2>/dev/null\n" +
                 "command -v xsetroot >/dev/null 2>&1 && xsetroot -solid '#0d1117'\n" +
                 "command -v openbox >/dev/null 2>&1 && openbox &\n" +
-                "sleep 0.4\n" +
+                "sleep 0.5\n" +
                 "command -v xterm >/dev/null 2>&1 && " +
                 "xterm -geometry 160x40+20+20 -fa Monospace -fs 11 -bg black -fg grey -ls -title NoskOS &\n" +
                 "wait\n"
@@ -175,15 +174,20 @@ class LinuxGuiRuntime(
         r.getOrNull()?.stdout?.trim() == "YES"
     }
 
+    /** Hard reset: mata tudo e limpa locks — obrigatorio antes de Iniciar. */
     private suspend fun cleanStaleLocks() {
         runtime.exec(
-            "vncserver -kill :1 2>/dev/null; " +
+            "export HOME=/root USER=root; " +
+                "vncserver -kill :1 2>/dev/null; " +
+                "vncserver -kill :1 2>/dev/null; " +
                 "pkill -9 -f Xtigervnc 2>/dev/null; " +
                 "pkill -9 -f Xvnc 2>/dev/null; " +
+                "pkill -9 -f Xtigervnc 2>/dev/null; " +
                 "rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 " +
-                "/root/.vnc/*.pid /root/.vnc/localhost:1.pid 2>/dev/null; " +
-                "sleep 0.3; echo cleaned",
-            timeoutSec = 20,
+                "/root/.vnc/*.pid /root/.vnc/localhost:1.pid " +
+                "/tmp/.X11-unix/X1 2>/dev/null; " +
+                "sleep 1; echo cleaned",
+            timeoutSec = 25,
         )
     }
 
@@ -219,7 +223,6 @@ class LinuxGuiRuntime(
             }
         }
 
-    /** Browser leve — dillo (preferido) ou links2. Sem Falkon/Qt. */
     suspend fun ensureLightBrowser(onProgress: ((String) -> Unit)? = null): Result<String> =
         withContext(Dispatchers.IO) {
             try {
@@ -245,7 +248,6 @@ class LinuxGuiRuntime(
             }
         }
 
-    /** Comando para lancar browser leve instalado. */
     fun lightBrowserCommand(): String =
         "sh -c 'command -v dillo >/dev/null && exec dillo || " +
             "command -v links2 >/dev/null && exec links2 -g || " +
@@ -264,8 +266,10 @@ class LinuxGuiRuntime(
         val hasStale = out.contains("stale", ignoreCase = true)
         val hasDisplay = out.lines().any { line ->
             val t = line.trim()
-            t.startsWith("1") || t.contains(":$displayNum")
+            (t.startsWith("1") || t.contains(":$displayNum")) &&
+                !t.contains("stale", ignoreCase = true)
         }
+        // Stale = NAO running — forca utilizador a Iniciar (reset)
         val running = hasDisplay && !hasStale
         GuiStatus(
             running = running,
@@ -273,13 +277,16 @@ class LinuxGuiRuntime(
             port = vncPort,
             geometry = geo,
             message = when {
-                hasStale -> "VNC stale — toca Iniciar"
+                hasStale -> "VNC stale — toca Iniciar (reset)"
                 running -> "VNC ativo $displayName ($vncPort)"
                 else -> "VNC parado"
             },
         )
     }
 
+    /**
+     * Iniciar SEMPRE com hard reset — evita "already running" / stale.
+     */
     suspend fun start(geometry: String? = null): Result<GuiStatus> =
         withContext(Dispatchers.IO) {
             try {
@@ -295,16 +302,20 @@ class LinuxGuiRuntime(
                 ensurePersistentDirs()
                 ensureXstartup()
                 ensureVncPasswd()
-                cleanStaleLocks()
                 val geo = geometry ?: deviceGeometry()
                 ensureStartVncScript(geo)
 
-                val cmd =
-                    "export HOME=/root USER=root; " +
-                        "vncserver $displayName -geometry $geo -depth 24 " +
-                        "-localhost yes -SecurityTypes None " +
-                        "-xstartup /root/.vnc/xstartup 2>&1"
-                val r = runtime.exec(cmd, timeoutSec = 60)
+                // 1) Sempre limpar
+                cleanStaleLocks()
+
+                // 2) Arrancar via script (mesmo path que o utilizador no terminal)
+                val viaScript =
+                    "export HOME=/root USER=root PATH=/usr/local/bin:\$PATH; " +
+                        "if [ -x /usr/local/bin/start-vnc ]; then /usr/local/bin/start-vnc; " +
+                        "else vncserver $displayName -geometry $geo -depth 24 " +
+                        "-localhost yes -SecurityTypes None -xstartup /root/.vnc/xstartup; fi 2>&1"
+
+                val r = runtime.exec(viaScript, timeoutSec = 90)
                 val body = buildString {
                     r.getOrNull()?.let {
                         if (it.stdout.isNotBlank()) appendLine(it.stdout)
@@ -312,23 +323,34 @@ class LinuxGuiRuntime(
                     }
                 }.trim()
 
-                Thread.sleep(1200)
-                val st = status()
+                Thread.sleep(1500)
+                var st = status()
                 if (st.running || body.contains("New") || body.contains("on port")) {
-                    Result.success(
+                    return@withContext Result.success(
                         st.copy(running = true, geometry = geo, message = "VNC OK $geo\n$body"),
                     )
-                } else {
-                    cleanStaleLocks()
-                    val r2 = runtime.exec(cmd, timeoutSec = 60)
-                    val body2 = r2.getOrNull()?.stdout.orEmpty()
-                    Thread.sleep(1000)
-                    val st2 = status()
-                    if (st2.running || body2.contains("New") || body2.contains("on port")) {
-                        Result.success(st2.copy(running = true, geometry = geo, message = body2))
-                    } else {
-                        Result.failure(IllegalStateException("Falha VNC:\n$body\n$body2"))
+                }
+
+                // 3) Segunda tentativa: reset + vncserver directo
+                cleanStaleLocks()
+                val cmd =
+                    "export HOME=/root USER=root; " +
+                        "vncserver $displayName -geometry $geo -depth 24 " +
+                        "-localhost yes -SecurityTypes None " +
+                        "-xstartup /root/.vnc/xstartup 2>&1"
+                val r2 = runtime.exec(cmd, timeoutSec = 90)
+                val body2 = buildString {
+                    r2.getOrNull()?.let {
+                        if (it.stdout.isNotBlank()) appendLine(it.stdout)
+                        if (it.stderr.isNotBlank()) appendLine(it.stderr)
                     }
+                }.trim()
+                Thread.sleep(1500)
+                st = status()
+                if (st.running || body2.contains("New") || body2.contains("on port")) {
+                    Result.success(st.copy(running = true, geometry = geo, message = "VNC OK $geo\n$body2"))
+                } else {
+                    Result.failure(IllegalStateException("Falha VNC apos 2 tentativas:\n$body\n$body2"))
                 }
             } catch (e: Exception) {
                 Result.failure(e)

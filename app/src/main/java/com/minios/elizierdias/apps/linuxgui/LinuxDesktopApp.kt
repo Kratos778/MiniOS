@@ -116,7 +116,9 @@ fun LinuxDesktopApp() {
                 },
                 onStart = {
                     runBusy {
-                        append("[GUI] A iniciar VNC $geometry...")
+                        // Sempre hard reset + start (nunca confiar em sessao antiga)
+                        append("[GUI] Reset + iniciar VNC $geometry...")
+                        gui.stop()
                         val r = gui.start(geometry)
                         if (r.isSuccess) {
                             val st = r.getOrNull()!!
