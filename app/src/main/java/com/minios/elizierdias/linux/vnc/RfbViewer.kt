@@ -56,12 +56,13 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
 /**
- * Rato Linux (Viewer RFB) — modo toque absoluto (como ecrã tactil):
- * - Onde tocas = onde o cursor vai (nao modo "trackpad")
- * - Toque = clique esquerdo
- * - Arrastar com dedo = arrastar com botao pressionado
- * - Botao L = forcar botao esquerdo (arrastar janelas)
- * Cursor: seta branca
+ * Viewer RFB — mecânica alinhada ao rato do desktop NoskOS (trackpad):
+ * - Arrastar = move o cursor SEM clicar
+ * - Toque = clique esquerdo na posicao do cursor
+ * - Duplo toque = 2x esquerdo
+ * - Toque longo = clique direito
+ * - Botao L = manter esquerdo (arrastar janelas)
+ * - Cursor branco
  */
 @Composable
 fun RfbViewer(
@@ -77,12 +78,45 @@ fun RfbViewer(
     var showKeys by remember { mutableStateOf(false) }
     var gamerMode by remember { mutableStateOf(false) }
     var lmbHold by remember { mutableStateOf(false) }
+    var rmbHold by remember { mutableStateOf(false) }
     var cursorX by remember { mutableFloatStateOf(-1f) }
     var cursorY by remember { mutableFloatStateOf(-1f) }
     var cursorVisible by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     var imeText by remember { mutableStateOf(" ") }
     val keyboard = LocalSoftwareKeyboardController.current
+
+    fun toFbLocal(x: Float, y: Float, vw: Float, vh: Float): Pair<Int, Int> {
+        if (client.fbWidth <= 0) return 0 to 0
+        val fw = client.fbWidth.toFloat()
+        val fh = client.fbHeight.toFloat()
+        val scale = minOf(vw / fw, vh / fh)
+        val ox = (vw - fw * scale) / 2f
+        val oy = (vh - fh * scale) / 2f
+        val fx = ((x - ox) / scale).toInt().coerceIn(0, (client.fbWidth - 1).coerceAtLeast(0))
+        val fy = ((y - oy) / scale).toInt().coerceIn(0, (client.fbHeight - 1).coerceAtLeast(0))
+        return fx to fy
+    }
+
+    fun pointerMask(): Int {
+        var m = 0
+        if (lmbHold) m = m or 1
+        if (rmbHold) m = m or 4
+        return m
+    }
+
+    fun sendMove(x: Float, y: Float, vw: Float, vh: Float) {
+        if (client.state != RfbClient.State.CONNECTED) return
+        val (fx, fy) = toFbLocal(x, y, vw, vh)
+        client.sendPointerEvent(fx, fy, pointerMask())
+    }
+
+    fun sendClick(mask: Int, x: Float, y: Float, vw: Float, vh: Float) {
+        if (client.state != RfbClient.State.CONNECTED) return
+        val (fx, fy) = toFbLocal(x, y, vw, vh)
+        client.sendPointerEvent(fx, fy, mask)
+        client.sendPointerEvent(fx, fy, pointerMask())
+    }
 
     fun tapKey(keysym: Int) {
         if (client.state != RfbClient.State.CONNECTED) return
@@ -105,11 +139,8 @@ fun RfbViewer(
             ' ' -> tapKey(0x20)
             else -> {
                 val code = ch.code
-                if (code in 0x20..0xFF) {
-                    tapKey(code)
-                } else if (code in 0x100..0xFFFD) {
-                    tapKey(0x01000000 or code)
-                }
+                if (code in 0x20..0xFF) tapKey(code)
+                else if (code in 0x100..0xFFFD) tapKey(0x01000000 or code)
             }
         }
     }
@@ -117,11 +148,15 @@ fun RfbViewer(
     fun openKeyboard() {
         try {
             if (client.state == RfbClient.State.CONNECTED && client.fbWidth > 0) {
-                val fx = client.fbWidth / 2
-                val fy = (client.fbHeight * 2) / 3
+                // Clique na zona tipica do xterm para focar
+                val fx = (client.fbWidth * 15) / 100
+                val fy = (client.fbHeight * 25) / 100
+                client.sendPointerEvent(fx, fy, 0)
                 client.sendPointerEvent(fx, fy, 1)
                 client.sendPointerEvent(fx, fy, 0)
             }
+            focusRequester.requestFocus()
+            keyboard?.show()
             focusRequester.requestFocus()
             keyboard?.show()
         } catch (_: Exception) {
@@ -172,94 +207,90 @@ fun RfbViewer(
         }
     }
 
+    LaunchedEffect(active, status) {
+        if (active && client.state == RfbClient.State.CONNECTED) {
+            delay(900)
+            try {
+                focusRequester.requestFocus()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     Box(modifier = modifier.fillMaxSize().background(Color(0xFF010409))) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .onSizeChanged { viewSize = it }
-                .pointerInput(active, client.fbWidth, client.fbHeight, lmbHold) {
+                .pointerInput(active, client.fbWidth, client.fbHeight, lmbHold, rmbHold) {
                     if (!active || client.fbWidth <= 0) return@pointerInput
-                    val fw = client.fbWidth.toFloat()
-                    val fh = client.fbHeight.toFloat()
+                    val vw = size.width.toFloat().coerceAtLeast(1f)
+                    val vh = size.height.toFloat().coerceAtLeast(1f)
 
-                    fun toFb(x: Float, y: Float): Pair<Int, Int> {
-                        val vw = size.width.toFloat().coerceAtLeast(1f)
-                        val vh = size.height.toFloat().coerceAtLeast(1f)
-                        val scale = minOf(vw / fw, vh / fh)
-                        val ox = (vw - fw * scale) / 2f
-                        val oy = (vh - fh * scale) / 2f
-                        val fx = ((x - ox) / scale).toInt()
-                            .coerceIn(0, (client.fbWidth - 1).coerceAtLeast(0))
-                        val fy = ((y - oy) / scale).toInt()
-                            .coerceIn(0, (client.fbHeight - 1).coerceAtLeast(0))
-                        return fx to fy
-                    }
-
-                    // Toque = clique (absoluto: dedo = cursor)
-                    detectTapGestures(
-                        onTap = { offset ->
-                            cursorX = offset.x
-                            cursorY = offset.y
-                            cursorVisible = true
-                            val (fx, fy) = toFb(offset.x, offset.y)
-                            client.sendPointerEvent(fx, fy, 1)
-                            if (!lmbHold) {
-                                client.sendPointerEvent(fx, fy, 0)
+                    // Trackpad: arrastar move cursor (com L/R se activos)
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            if (cursorX < 0f) {
+                                cursorX = offset.x
+                                cursorY = offset.y
                             }
-                        },
-                        onDoubleTap = { openKeyboard() },
-                        onLongPress = { offset ->
-                            // clique direito
-                            cursorX = offset.x
-                            cursorY = offset.y
                             cursorVisible = true
-                            val (fx, fy) = toFb(offset.x, offset.y)
-                            client.sendPointerEvent(fx, fy, 4)
-                            client.sendPointerEvent(fx, fy, 0)
+                            sendMove(cursorX, cursorY, vw, vh)
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            if (cursorX < 0f) {
+                                cursorX = change.position.x
+                                cursorY = change.position.y
+                            } else {
+                                cursorX = (cursorX + dragAmount.x).coerceIn(0f, vw)
+                                cursorY = (cursorY + dragAmount.y).coerceIn(0f, vh)
+                            }
+                            cursorVisible = true
+                            sendMove(cursorX, cursorY, vw, vh)
+                        },
+                        onDragEnd = {
+                            sendMove(cursorX.coerceAtLeast(0f), cursorY.coerceAtLeast(0f), vw, vh)
+                        },
+                        onDragCancel = {
+                            sendMove(cursorX.coerceAtLeast(0f), cursorY.coerceAtLeast(0f), vw, vh)
                         },
                     )
                 }
-                .pointerInput(active, client.fbWidth, client.fbHeight, lmbHold) {
+                .pointerInput(active, client.fbWidth, client.fbHeight, lmbHold, rmbHold) {
                     if (!active || client.fbWidth <= 0) return@pointerInput
-                    val fw = client.fbWidth.toFloat()
-                    val fh = client.fbHeight.toFloat()
+                    val vw = size.width.toFloat().coerceAtLeast(1f)
+                    val vh = size.height.toFloat().coerceAtLeast(1f)
 
-                    fun toFb(x: Float, y: Float): Pair<Int, Int> {
-                        val vw = size.width.toFloat().coerceAtLeast(1f)
-                        val vh = size.height.toFloat().coerceAtLeast(1f)
-                        val scale = minOf(vw / fw, vh / fh)
-                        val ox = (vw - fw * scale) / 2f
-                        val oy = (vh - fh * scale) / 2f
-                        val fx = ((x - ox) / scale).toInt()
-                            .coerceIn(0, (client.fbWidth - 1).coerceAtLeast(0))
-                        val fy = ((y - oy) / scale).toInt()
-                            .coerceIn(0, (client.fbHeight - 1).coerceAtLeast(0))
-                        return fx to fy
-                    }
-
-                    // Arrastar = mover com botao esquerdo pressionado (como rato normal)
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            cursorX = offset.x
-                            cursorY = offset.y
+                    detectTapGestures(
+                        onTap = {
+                            // Clique esquerdo na posicao do cursor (nao no dedo)
+                            val cx = if (cursorX >= 0f) cursorX else it.x
+                            val cy = if (cursorY >= 0f) cursorY else it.y
+                            cursorX = cx
+                            cursorY = cy
                             cursorVisible = true
-                            val (fx, fy) = toFb(offset.x, offset.y)
-                            client.sendPointerEvent(fx, fy, 1)
+                            sendClick(1, cx, cy, vw, vh)
                         },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            cursorX = change.position.x
-                            cursorY = change.position.y
-                            val (fx, fy) = toFb(change.position.x, change.position.y)
-                            client.sendPointerEvent(fx, fy, 1)
+                        onDoubleTap = {
+                            val cx = if (cursorX >= 0f) cursorX else it.x
+                            val cy = if (cursorY >= 0f) cursorY else it.y
+                            cursorX = cx
+                            cursorY = cy
+                            cursorVisible = true
+                            sendClick(1, cx, cy, vw, vh)
+                            sendClick(1, cx, cy, vw, vh)
                         },
-                        onDragEnd = {
-                            val (fx, fy) = toFb(cursorX, cursorY)
-                            client.sendPointerEvent(fx, fy, if (lmbHold) 1 else 0)
-                        },
-                        onDragCancel = {
-                            val (fx, fy) = toFb(cursorX, cursorY)
-                            client.sendPointerEvent(fx, fy, if (lmbHold) 1 else 0)
+                        onLongPress = {
+                            val cx = if (cursorX >= 0f) cursorX else it.x
+                            val cy = if (cursorY >= 0f) cursorY else it.y
+                            cursorX = cx
+                            cursorY = cy
+                            cursorVisible = true
+                            // Direito: ativa rmbHold para arrastar janela; toque L solta
+                            rmbHold = true
+                            sendMove(cx, cy, vw, vh)
+                            sendClick(4, cx, cy, vw, vh)
                         },
                     )
                 },
@@ -288,13 +319,16 @@ fun RfbViewer(
                 )
             }
 
-            // Cursor branco — ponta no ponto do toque
             if (active && cursorVisible && cursorX >= 0f) {
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val cx = cursorX
                     val cy = cursorY
-                    val fill = if (lmbHold) Color(0xFFFFCCCC) else Color(0xFFFFFFFF)
-                    val edge = if (lmbHold) Color(0xFFFF4444) else Color(0xFF222222)
+                    val fill = when {
+                        lmbHold -> Color(0xFFFFCCCC)
+                        rmbHold -> Color(0xFFCCFFCC)
+                        else -> Color(0xFFFFFFFF)
+                    }
+                    val edge = Color(0xFF222222)
                     val path = Path().apply {
                         moveTo(cx, cy)
                         lineTo(cx + 14f, cy + 22f)
@@ -361,18 +395,29 @@ fun RfbViewer(
                             )
                             .clickable {
                                 lmbHold = !lmbHold
-                                if (!lmbHold && cursorX >= 0f && client.fbWidth > 0) {
-                                    val fw = client.fbWidth.toFloat()
-                                    val fh = client.fbHeight.toFloat()
-                                    val vw = viewSize.width.toFloat().coerceAtLeast(1f)
-                                    val vh = viewSize.height.toFloat().coerceAtLeast(1f)
-                                    val scale = minOf(vw / fw, vh / fh)
-                                    val ox = (vw - fw * scale) / 2f
-                                    val oy = (vh - fh * scale) / 2f
-                                    val fx = ((cursorX - ox) / scale).toInt()
-                                    val fy = ((cursorY - oy) / scale).toInt()
-                                    client.sendPointerEvent(fx, fy, 0)
-                                }
+                                if (rmbHold && lmbHold) rmbHold = false
+                                val vw = viewSize.width.toFloat().coerceAtLeast(1f)
+                                val vh = viewSize.height.toFloat().coerceAtLeast(1f)
+                                if (cursorX >= 0f) sendMove(cursorX, cursorY, vw, vh)
+                            }
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                    )
+                    Text(
+                        text = if (rmbHold) "R●" else "R",
+                        color = if (rmbHold) Color(0xFF3FB950) else Color(0xFFC9D1D9),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier
+                            .background(
+                                if (rmbHold) Color(0xCC1F3D2A) else Color(0xCC161B22),
+                                RoundedCornerShape(4.dp),
+                            )
+                            .clickable {
+                                rmbHold = !rmbHold
+                                if (lmbHold && rmbHold) lmbHold = false
+                                val vw = viewSize.width.toFloat().coerceAtLeast(1f)
+                                val vh = viewSize.height.toFloat().coerceAtLeast(1f)
+                                if (cursorX >= 0f) sendMove(cursorX, cursorY, vw, vh)
                             }
                             .padding(horizontal = 8.dp, vertical = 5.dp),
                     )
