@@ -7,9 +7,11 @@
 
 package com.minios.elizierdias
 
+import android.Manifest
 import android.app.role.RoleManager
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -20,18 +22,32 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.minios.elizierdias.core.NoskKeepAliveService
+import com.minios.elizierdias.core.NoskLog
 import com.minios.elizierdias.shell.desktop.Desktop
 import com.minios.elizierdias.ui.theme.MiniOSTheme
 
 class MainActivity : ComponentActivity() {
+
+    private val notifPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            NoskLog.event(
+                NoskLog.SERVICE,
+                "POST_NOTIFICATIONS",
+                to = if (granted) "granted" else "denied",
+            )
+            // Arrancar FGS depois da resposta (Android 13+)
+            NoskKeepAliveService.start(this)
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,7 +63,7 @@ class MainActivity : ComponentActivity() {
 
         maybeRequestHomeRole()
         maybeRequestIgnoreBatteryOptimizations()
-        NoskKeepAliveService.start(this)
+        maybeRequestNotificationsThenStartRuntime()
 
         setContent {
             MiniOSTheme {
@@ -56,6 +72,20 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun maybeRequestNotificationsThenStartRuntime() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            val ok = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!ok) {
+                notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+        }
+        NoskKeepAliveService.start(this)
     }
 
     private fun maybeRequestHomeRole() {
@@ -78,9 +108,11 @@ class MainActivity : ComponentActivity() {
                     Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 )
                 prefs.edit().putBoolean("home_prompt_done", true).apply()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                NoskLog.e(NoskLog.SERVICE, "HOME settings: ${e.message}", e)
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            NoskLog.e(NoskLog.SERVICE, "HOME role: ${e.message}", e)
         }
     }
 
@@ -101,10 +133,12 @@ class MainActivity : ComponentActivity() {
             }
             startActivity(intent)
             prefs.edit().putBoolean("battery_prompt_done", true).apply()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            NoskLog.e(NoskLog.SERVICE, "battery opt: ${e.message}", e)
             try {
                 startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-            } catch (_: Exception) {
+            } catch (e2: Exception) {
+                NoskLog.e(NoskLog.SERVICE, "battery settings: ${e2.message}", e2)
             }
         }
     }
@@ -121,6 +155,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
+        NoskLog.w(NoskLog.RUNTIME, "onTrimMemory level=$level state=${NoskKeepAliveService.runtimeState.get()}")
         when (level) {
             TRIM_MEMORY_RUNNING_CRITICAL,
             TRIM_MEMORY_COMPLETE,
