@@ -1,10 +1,12 @@
 package com.minios.elizierdias.apps
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.ui.geometry.Size
 import com.minios.elizierdias.core.MiniApp
@@ -17,6 +19,14 @@ object AppRegistry {
             "Files",
             Icons.Filled.Folder,
             defaultSize = Size(520f, 400f),
+        )
+
+    val terminal =
+        MiniApp(
+            "terminal",
+            "Terminal",
+            Icons.Filled.Terminal,
+            defaultSize = Size(520f, 360f),
         )
 
     val browser =
@@ -43,6 +53,14 @@ object AppRegistry {
             defaultSize = Size(560f, 420f),
         )
 
+    val linuxDesktop =
+        MiniApp(
+            "linux_desktop",
+            "Linux",
+            Icons.Filled.Computer,
+            defaultSize = Size(900f, 560f),
+        )
+
     val settings =
         MiniApp(
             "settings",
@@ -60,15 +78,17 @@ object AppRegistry {
         )
 
     /**
-     * Desktop sem Terminal/Linux por agora (subsistema Linux a refazer do zero).
-     * Ordem fixa — ícones NÃO são arrastáveis.
+     * Ordem fixa no desktop (ícones NÃO são arrastáveis).
+     * Terminal + Linux estão ativos e em atualização contínua.
      */
     val desktopIcons: List<MiniApp> =
         listOf(
             files,
+            terminal,
             browser,
             softwareCenter,
             mediaPlayer,
+            linuxDesktop,
             settings,
             smartPlay,
         )

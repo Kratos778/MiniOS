@@ -1,31 +1,43 @@
-# Linux 2.0 — plano do zero
+# Linux no NoskOS — atualização (não descontinuação)
 
-O stack antigo (PRoot + Debian rootfs + TigerVNC + terminal one-shot) foi **desligado** na 0.5 porque:
+O subsistema Linux **permanece parte central do projeto**.
+O objetivo é atualizá-lo até apps Linux reais (CLI + GUI) funcionarem de forma estável.
 
-- instalava RootFS pesado no dispositivo (centenas de MB → ~1GB)
-- terminal não era shell interativo real
-- GUI VNC frágil (locks, packages, performance)
-- APK/build puxava proot no preBuild
+## Stack atual (mantido)
 
-## Objetivo futuro
+- **PRoot** (UserLAnd arm64) embutido no APK via `jniLibs`
+- **Debian ARM64** RootFS (instalação sob demanda no dispositivo)
+- **Terminal** via `LinuxSession` + `LinuxRuntime.exec`
+- **GUI** TigerVNC + Openbox + RFB viewer na app **Linux**
 
-Conseguir **abrir apps Linux reais** (gráficas e CLI) de forma estável, sem rebentear o telemóvel.
+## Problemas conhecidos a corrigir (prioridade)
+
+1. **Instalação frágil** — multi-passos (`install` → `setup-runtime` → …); falhas a meio deixam estado inconsistente
+2. **Terminal one-shot** — cada comando é `proot … sh -c`, não PTY interativo (vim/top sofrem)
+3. **VNC** — locks stale, packages em falta, geometry, input RFB
+4. **Peso no dispositivo** — RootFS ocupa centenas de MB depois de instalado (opt-in; APK base só traz proot)
+5. **Feedback de erro** — mensagens pouco claras quando falta permissão / DNS / dpkg
+
+## Direção da atualização
+
+| Fase | Objetivo |
+|------|----------|
+| A | Wizard único de setup (install+runtime+dns+storage) com progresso e retry |
+| B | Terminal mais robusto (timeouts, repair, status, multi-linha estável) |
+| C | VNC: start/stop fiável + lançar apps (xterm, dillo) sem locks mortos |
+| D | (Futuro) shell interativo / PTY se for viável em PRoot |
 
 ## Princípios
 
-1. **Opt-in**: Linux só depois do utilizador escolher instalar (download sob demanda).
-2. **Leve no APK**: zero rootfs e zero proot no APK base.
-3. **Shell interativo de verdade** (PTY), não `sh -c` por comando.
-4. **Apps gráficas** com caminho claro (X11/Wayland via proot/chroot ou runtime alternativo testado).
-5. **Um botão “reparar / reinstal”** que não deixa o sistema a meio.
+1. **Atualizar**, não remover o Linux da UI
+2. RootFS continua **opt-in** (utilizador corre `install`)
+3. APK base leve: só libs proot; Debian baixa sob demanda
+4. Um fluxo de **reparar / reinstall** claro
+5. Clique direito e ícones arrastáveis continuam fora de escopo do desktop Nosk
 
-## Fora de escopo por agora
+## Ficheiros principais
 
-- Clique direito
-- Ícones do Desktop arrastáveis
-- Scroll Mode separado
-
-## Estado atual
-
-Código antigo em `app/.../linux/` e `apps/terminal/` **não está ligado** ao Desktop.
-Quando formos reescrever, preferir nova pasta (ex. `linux2/`) em vez de reanimar o stack quebrado.
+- `linux/LinuxManager.kt`, `LinuxRuntime.kt`, `LinuxRootFs.kt`, `LinuxSession.kt`
+- `linux/LinuxGuiRuntime.kt`, `linux/vnc/*`
+- `apps/terminal/TerminalApp.kt`
+- `apps/linuxgui/LinuxDesktopApp.kt`

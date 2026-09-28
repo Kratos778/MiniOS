@@ -42,10 +42,12 @@ import coil.request.ImageRequest
 import com.minios.elizierdias.apps.AppRegistry
 import com.minios.elizierdias.apps.browser.BrowserApp
 import com.minios.elizierdias.apps.files.FilesApp
+import com.minios.elizierdias.apps.linuxgui.LinuxDesktopApp
 import com.minios.elizierdias.apps.media.MediaPlayerOS
 import com.minios.elizierdias.apps.settings.SettingsApp
 import com.minios.elizierdias.apps.settings.isVideoPath
 import com.minios.elizierdias.apps.softwarecenter.SoftwareCenterApp
+import com.minios.elizierdias.apps.terminal.TerminalApp
 import com.minios.elizierdias.core.MiniApp
 import com.minios.elizierdias.core.MiniOSConfig
 import com.minios.elizierdias.core.PowerMode
@@ -148,6 +150,8 @@ fun Desktop() {
                             ) {
                                 when (window.app.id) {
                                     "files" -> FilesApp()
+                                    "terminal" -> TerminalApp()
+                                    "linux_desktop" -> LinuxDesktopApp()
                                     "settings" -> SettingsApp()
                                     "software_center" -> SoftwareCenterApp()
                                     "browser" -> BrowserApp()

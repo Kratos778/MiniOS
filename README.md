@@ -6,7 +6,7 @@ Desktop estilo PC num APK Android.
 |---|---|
 | **Package** | `com.minios.elizierdias` |
 | **Nome visível** | NoskOS |
-| **Versão** | 0.5.0 |
+| **Versão** | 0.5.1 |
 | **Licença** | **Proprietária — All Rights Reserved** |
 
 > **Aviso legal:** Este projeto é software proprietário.  
@@ -14,28 +14,34 @@ Desktop estilo PC num APK Android.
 > sem autorização prévia e por escrito do autor.  
 > Ver ficheiro `LICENSE` e `COPYRIGHT.md`.
 
-## O que funciona (0.5)
+## O que funciona
 
 - Desktop **landscape** (toque normal)
 - **Wallpaper**: gradientes, foto, gif ou vídeo
-- Janelas (mover, **redimensionar** por bordas/canto, min/max/fechar)
+- Janelas (mover, redimensionar por bordas/canto, min/max/fechar)
 - Taskbar + Start Menu
 - **Files** com acesso ao armazenamento do telefone
-- Settings, Browser, MediaPlayerOS, Software Center
-- Ponteiro virtual (só clique esquerdo — direito fora de escopo)
+- Terminal, Settings, Software Center, Browser, MediaPlayerOS
+- **Subsistema Linux** (PRoot + Debian + TigerVNC) — **em atualização**, não descontinuado
+- Ponteiro virtual (clique esquerdo)
 
-## Removido nesta versão
+## Linux (atualização contínua)
 
-- **Terminal / subsistema Linux (PRoot + Debian + VNC)** — desligado da UI e do build.
-- O código antigo de Linux fica no repositório só como referência; **vai ser reescrito do zero** para correr apps Linux reais de forma estável e leve.
+O stack Linux **não foi abandonado**. Está a ser estabilizado para:
 
-## Limpar dados antigos no telemóvel
+1. Instalação mais fiável (RootFS + PRoot + DNS + storage)
+2. Terminal utilizável de forma previsível
+3. Apps Linux gráficas reais via VNC (Openbox, xterm, Dillo, etc.)
 
-Se tinhas RootFS instalado (~centenas de MB / 1GB):
+Ver `docs/LINUX_V2.md` para o plano de melhorias.
 
-1. Definições Android → Apps → NoskOS → **Limpar armazenamento / dados**
-2. Ou apaga manualmente pastas tipo `/sdcard/MiniOS` se existirem
-3. Reinstala o APK 0.5
+### Setup rápido no Terminal
+
+1. `install` (RootFS)
+2. `setup-runtime`
+3. `setup-storage`
+4. `setup-dns`
+5. No app **Linux**: Controlo → Pacotes → Iniciar
 
 ## Wallpaper de foto
 

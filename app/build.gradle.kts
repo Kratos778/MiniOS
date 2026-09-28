@@ -10,11 +10,12 @@ android {
     compileSdk = 34
 
     defaultConfig {
+        // Mesmo package sempre — update em cima sem desinstalar (RootFS preservado)
         applicationId = "com.minios.elizierdias"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.5.0"
+        versionCode = 8
+        versionName = "0.5.1"
         vectorDrawables { useSupportLibrary = true }
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -64,9 +65,80 @@ android {
     }
 }
 
-// PRoot / Linux stack DESLIGADO nesta versão (0.5).
-// Será reintroduzido do zero quando o runtime de apps Linux estiver estável.
-// Não descarrega UserLAnd assets no preBuild → APK mais leve.
+// Linux stack ATIVO — PRoot (UserLAnd) no preBuild para Terminal + GUI
+val jniArm64 = layout.projectDirectory.dir("src/main/jniLibs/arm64-v8a")
+val prootSo = jniArm64.file("libproot.so")
+val loaderSo = jniArm64.file("libproot_loader.so")
+val tallocSo = jniArm64.file("libtalloc.so")
+val userlandZipUrl =
+    "https://github.com/CypherpunkArmory/UserLAnd-Assets-Support/releases/download/v1.5.1/arm64-v8a-assets.zip"
+
+val downloadProotStack by tasks.registering {
+    description = "Download UserLAnd proot+loader+talloc into jniLibs"
+    outputs.files(prootSo, loaderSo, tallocSo)
+    doLast {
+        val outDir = jniArm64.asFile
+        outDir.mkdirs()
+        val proot = prootSo.asFile
+        val loader = loaderSo.asFile
+        val talloc = tallocSo.asFile
+
+        if (proot.exists() && proot.length() > 50_000 &&
+            loader.exists() && loader.length() > 5_000 &&
+            talloc.exists() && talloc.length() > 10_000
+        ) {
+            println("PRoot stack already present in jniLibs")
+            return@doLast
+        }
+
+        val tmpZip = File(outDir, "_ul_assets.zip")
+        val tmpDir = File(outDir, "_ul_extract")
+        tmpDir.mkdirs()
+
+        println("Downloading UserLAnd arm64 assets…")
+        ant.invokeMethod(
+            "get",
+            mapOf("src" to userlandZipUrl, "dest" to tmpZip, "skipexisting" to false),
+        )
+        if (!tmpZip.exists() || tmpZip.length() < 1_000_000) {
+            throw GradleException("Failed to download UserLAnd assets (${tmpZip.length()} bytes)")
+        }
+
+        ant.invokeMethod(
+            "unzip",
+            mapOf("src" to tmpZip, "dest" to tmpDir, "overwrite" to true),
+        )
+
+        fun findFile(name: String): File {
+            val matches = tmpDir.walkTopDown().filter { it.isFile && it.name == name }.toList()
+            if (matches.isEmpty()) throw GradleException("Missing $name in UserLAnd zip")
+            return matches.first()
+        }
+
+        val srcProot = findFile("proot")
+        val srcLoader = findFile("loader")
+        val srcTalloc = tmpDir.walkTopDown()
+            .filter { it.isFile && (it.name == "libtalloc.so.2" || it.name.startsWith("libtalloc")) }
+            .firstOrNull() ?: throw GradleException("Missing libtalloc in UserLAnd zip")
+
+        srcProot.copyTo(proot, overwrite = true)
+        srcLoader.copyTo(loader, overwrite = true)
+        srcTalloc.copyTo(talloc, overwrite = true)
+
+        listOf(proot, loader, talloc).forEach { f ->
+            val magic = f.inputStream().use { it.readNBytes(4) }
+            if (magic[0] != 0x7f.toByte() || magic[1] != 'E'.code.toByte()) {
+                throw GradleException("${f.name} is not ELF")
+            }
+            println("OK ${f.name} (${f.length()} bytes)")
+        }
+
+        tmpZip.delete()
+        tmpDir.deleteRecursively()
+    }
+}
+
+tasks.named("preBuild").configure { dependsOn(downloadProotStack) }
 
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
@@ -87,7 +159,9 @@ dependencies {
     implementation("androidx.media3:media3-transformer:1.4.1")
     implementation("androidx.media3:media3-effect:1.4.1")
 
-    // compress/xz só eram usados pelo instalador RootFS — removidos até Linux 2.0
+    // RootFS install (tar.xz Debian)
+    implementation("org.apache.commons:commons-compress:1.26.2")
+    implementation("org.tukaani:xz:1.9")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
