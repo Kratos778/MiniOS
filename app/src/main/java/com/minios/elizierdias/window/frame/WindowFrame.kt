@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -67,7 +68,6 @@ fun WindowFrame(
 
     var dragPos by remember(window.instanceId) { mutableStateOf(window.position) }
 
-    // Minimizada = size 0 (invisível, content mantido na árvore)
     val frameModifier = if (window.isMinimized) {
         Modifier.size(0.dp)
     } else {
@@ -179,57 +179,55 @@ fun WindowFrame(
             }
         }
 
-        // Resize handles (só quando normal)
         if (!window.isMinimized && !window.isMaximized) {
+            // Borda direita (fina, área de arrasto)
             ResizeHandle(
                 edge = ResizeEdge.RIGHT,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .fillMaxWidth(0f)
-                    .width(12.dp)
-                    .height(windowHeight - 36.dp),
+                    .width(14.dp)
+                    .fillMaxHeight()
+                    .padding(top = 36.dp, bottom = 28.dp),
                 windowSize = window.size,
                 onFocus = onFocus,
                 onResize = onResize,
             )
+            // Borda inferior
             ResizeHandle(
                 edge = ResizeEdge.BOTTOM,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .height(12.dp)
-                    .padding(end = 20.dp),
+                    .height(14.dp)
+                    .padding(end = 28.dp),
                 windowSize = window.size,
                 onFocus = onFocus,
                 onResize = onResize,
             )
-            // Canto inferior-direito (handle visível)
+            // Canto inferior-direito com grip visível
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .size(28.dp)
-                    .pointerInput(window.instanceId, window.size) {
-                        var start = window.size
+                    .pointerInput(window.instanceId, window.size.width, window.size.height) {
+                        var startW = window.size.width
+                        var startH = window.size.height
                         detectDragGestures(
                             onDragStart = {
                                 onFocus()
-                                start = window.size
+                                startW = window.size.width
+                                startH = window.size.height
                             },
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                start = Size(
-                                    width = (start.width + dragAmount.x)
-                                        .coerceAtLeast(WindowManager.MIN_WIDTH),
-                                    height = (start.height + dragAmount.y)
-                                        .coerceAtLeast(WindowManager.MIN_HEIGHT),
-                                )
-                                onResize(start)
+                                startW = (startW + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
+                                startH = (startH + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
+                                onResize(Size(startW, startH))
                             },
                         )
                     },
                 contentAlignment = Alignment.BottomEnd,
             ) {
-                // grip visual estilo PC
                 Box(
                     modifier = Modifier
                         .padding(4.dp)
@@ -253,34 +251,30 @@ private fun ResizeHandle(
     onResize: (Size) -> Unit,
 ) {
     Box(
-        modifier = modifier.pointerInput(edge, windowSize) {
-            var start = windowSize
+        modifier = modifier.pointerInput(edge, windowSize.width, windowSize.height) {
+            var startW = windowSize.width
+            var startH = windowSize.height
             detectDragGestures(
                 onDragStart = {
                     onFocus()
-                    start = windowSize
+                    startW = windowSize.width
+                    startH = windowSize.height
                 },
                 onDrag = { change, dragAmount ->
                     change.consume()
-                    start = when (edge) {
-                        ResizeEdge.RIGHT -> Size(
-                            width = (start.width + dragAmount.x)
-                                .coerceAtLeast(WindowManager.MIN_WIDTH),
-                            height = start.height,
-                        )
-                        ResizeEdge.BOTTOM -> Size(
-                            width = start.width,
-                            height = (start.height + dragAmount.y)
-                                .coerceAtLeast(WindowManager.MIN_HEIGHT),
-                        )
-                        ResizeEdge.BOTTOM_RIGHT -> Size(
-                            width = (start.width + dragAmount.x)
-                                .coerceAtLeast(WindowManager.MIN_WIDTH),
-                            height = (start.height + dragAmount.y)
-                                .coerceAtLeast(WindowManager.MIN_HEIGHT),
-                        )
+                    when (edge) {
+                        ResizeEdge.RIGHT -> {
+                            startW = (startW + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
+                        }
+                        ResizeEdge.BOTTOM -> {
+                            startH = (startH + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
+                        }
+                        ResizeEdge.BOTTOM_RIGHT -> {
+                            startW = (startW + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
+                            startH = (startH + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
+                        }
                     }
-                    onResize(start)
+                    onResize(Size(startW, startH))
                 },
             )
         },
