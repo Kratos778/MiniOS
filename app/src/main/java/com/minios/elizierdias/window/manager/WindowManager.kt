@@ -108,6 +108,11 @@ class WindowManager {
         }
     }
 
+    /**
+     * Resize a partir do canto/bordas inferiores-direita:
+     * a posição (topo-esquerdo) mantém-se; só o tamanho muda.
+     * Só ajusta X/Y se a janela sair dos limites do desktop.
+     */
     fun resize(instanceId: String, newSize: Size) {
         _windows.replaceInPlace { window ->
             if (window.instanceId != instanceId) return@replaceInPlace window
@@ -117,8 +122,22 @@ class WindowManager {
                 width = newSize.width.coerceIn(MIN_WIDTH, desktopBounds.width),
                 height = newSize.height.coerceIn(MIN_HEIGHT, desktopBounds.height),
             )
-            val pos = clampPosition(window.position, safe)
-            window.copy(size = safe, position = pos)
+
+            var x = window.position.x
+            var y = window.position.y
+
+            // Se a janela ultrapassar a direita/baixo do desktop, puxa para dentro
+            if (x + safe.width > desktopBounds.width) {
+                x = (desktopBounds.width - safe.width).coerceAtLeast(0f)
+            }
+            if (y + safe.height > desktopBounds.height) {
+                y = (desktopBounds.height - safe.height).coerceAtLeast(0f)
+            }
+            // Nunca deixa a barra de título sair completamente
+            x = x.coerceIn(-(safe.width - TITLE_GRAB).coerceAtLeast(0f), (desktopBounds.width - TITLE_GRAB).coerceAtLeast(0f))
+            y = y.coerceIn(0f, (desktopBounds.height - TITLE_BAR).coerceAtLeast(0f))
+
+            window.copy(size = safe, position = Offset(x, y))
         }
     }
 
@@ -143,7 +162,6 @@ class WindowManager {
 
     fun restore(instanceId: String) {
         if (_windows.none { it.instanceId == instanceId }) return
-        // Restaurar geometria se estava maximizada ao minimizar
         val saved = normalGeometry[instanceId]
         if (saved != null) {
             _windows.replaceInPlace { window ->

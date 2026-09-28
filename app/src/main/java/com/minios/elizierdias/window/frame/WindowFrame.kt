@@ -42,6 +42,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.minios.elizierdias.core.MiniWindow
+import com.minios.elizierdias.window.manager.WindowManager
+
+private enum class ResizeEdge {
+    RIGHT,
+    BOTTOM,
+    BOTTOM_RIGHT,
+}
 
 @Composable
 fun WindowFrame(
@@ -60,7 +67,7 @@ fun WindowFrame(
 
     var dragPos by remember(window.instanceId) { mutableStateOf(window.position) }
 
-    // Minimizada = size 0 (invisivel, content mantido na arvore)
+    // Minimizada = size 0 (invisível, content mantido na árvore)
     val frameModifier = if (window.isMinimized) {
         Modifier.size(0.dp)
     } else {
@@ -101,8 +108,7 @@ fun WindowFrame(
                         .background(
                             if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128),
                         )
-                        .pointerInput(window.instanceId, window.isMaximized, window.position) {
-                            // Arrastar barra de titulo: se maximizada, move() desmaximiza
+                        .pointerInput(window.instanceId, window.isMaximized) {
                             detectDragGestures(
                                 onDragStart = {
                                     onFocus()
@@ -173,29 +179,110 @@ fun WindowFrame(
             }
         }
 
+        // Resize handles (só quando normal)
         if (!window.isMinimized && !window.isMaximized) {
-            var resizeSize by remember(window.instanceId) { mutableStateOf(window.size) }
+            ResizeHandle(
+                edge = ResizeEdge.RIGHT,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxWidth(0f)
+                    .width(12.dp)
+                    .height(windowHeight - 36.dp),
+                windowSize = window.size,
+                onFocus = onFocus,
+                onResize = onResize,
+            )
+            ResizeHandle(
+                edge = ResizeEdge.BOTTOM,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(12.dp)
+                    .padding(end = 20.dp),
+                windowSize = window.size,
+                onFocus = onFocus,
+                onResize = onResize,
+            )
+            // Canto inferior-direito (handle visível)
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .size(24.dp)
-                    .pointerInput(window.instanceId) {
+                    .size(28.dp)
+                    .pointerInput(window.instanceId, window.size) {
+                        var start = window.size
                         detectDragGestures(
                             onDragStart = {
                                 onFocus()
-                                resizeSize = window.size
+                                start = window.size
                             },
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                resizeSize = Size(
-                                    width = (resizeSize.width + dragAmount.x).coerceAtLeast(280f),
-                                    height = (resizeSize.height + dragAmount.y).coerceAtLeast(200f),
+                                start = Size(
+                                    width = (start.width + dragAmount.x)
+                                        .coerceAtLeast(WindowManager.MIN_WIDTH),
+                                    height = (start.height + dragAmount.y)
+                                        .coerceAtLeast(WindowManager.MIN_HEIGHT),
                                 )
-                                onResize(resizeSize)
+                                onResize(start)
                             },
                         )
                     },
-            )
+                contentAlignment = Alignment.BottomEnd,
+            ) {
+                // grip visual estilo PC
+                Box(
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .size(14.dp)
+                        .background(
+                            color = if (window.isFocused) Color(0xFF58A6FF) else Color(0xFF484F58),
+                            shape = RoundedCornerShape(2.dp),
+                        ),
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun ResizeHandle(
+    edge: ResizeEdge,
+    modifier: Modifier,
+    windowSize: Size,
+    onFocus: () -> Unit,
+    onResize: (Size) -> Unit,
+) {
+    Box(
+        modifier = modifier.pointerInput(edge, windowSize) {
+            var start = windowSize
+            detectDragGestures(
+                onDragStart = {
+                    onFocus()
+                    start = windowSize
+                },
+                onDrag = { change, dragAmount ->
+                    change.consume()
+                    start = when (edge) {
+                        ResizeEdge.RIGHT -> Size(
+                            width = (start.width + dragAmount.x)
+                                .coerceAtLeast(WindowManager.MIN_WIDTH),
+                            height = start.height,
+                        )
+                        ResizeEdge.BOTTOM -> Size(
+                            width = start.width,
+                            height = (start.height + dragAmount.y)
+                                .coerceAtLeast(WindowManager.MIN_HEIGHT),
+                        )
+                        ResizeEdge.BOTTOM_RIGHT -> Size(
+                            width = (start.width + dragAmount.x)
+                                .coerceAtLeast(WindowManager.MIN_WIDTH),
+                            height = (start.height + dragAmount.y)
+                                .coerceAtLeast(WindowManager.MIN_HEIGHT),
+                        )
+                    }
+                    onResize(start)
+                },
+            )
+        },
+    )
 }
