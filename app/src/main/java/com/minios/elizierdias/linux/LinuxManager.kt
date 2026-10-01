@@ -66,10 +66,86 @@ class LinuxManager(
                 LinuxConfig.setEnabled(false)
             }
             else -> {
-                _statusMessage.value = "Run: install   then: setup-runtime"
+                _statusMessage.value = "Run: full-setup   (ou install → setup-runtime)"
                 _isReady.value = false
                 LinuxConfig.setEnabled(false)
             }
+        }
+    }
+
+    /**
+     * Wizard completo: faz install + setup-runtime + setup-dns + setup-storage + bootstrap
+     * numa única operação com progresso unificado.
+     * Ideal para o utilizador não precisar de correr 4 comandos separados.
+     */
+    suspend fun fullSetup(): Result<Unit> {
+        _installProgress.value = "═══ NoskOS Linux full-setup ═══"
+        _statusMessage.value = "full-setup a iniciar..."
+
+        // 1. RootFS
+        _installProgress.value = "[1/5] RootFS..."
+        val installResult = installRootFs()
+        if (installResult.isFailure) {
+            val err = installResult.exceptionOrNull()?.message ?: "install failed"
+            _statusMessage.value = "full-setup FALHOU no RootFS: $err"
+            return Result.failure(installResult.exceptionOrNull() ?: Exception(err))
+        }
+        _installProgress.value = "[1/5] RootFS OK"
+
+        // 2. PRoot / runtime
+        _installProgress.value = "[2/5] PRoot / runtime..."
+        val runtimeResult = setupRuntime()
+        if (runtimeResult.isFailure) {
+            val err = runtimeResult.exceptionOrNull()?.message ?: "setup-runtime failed"
+            _statusMessage.value = "full-setup FALHOU no runtime: $err"
+            return Result.failure(runtimeResult.exceptionOrNull() ?: Exception(err))
+        }
+        _installProgress.value = "[2/5] PRoot OK"
+
+        // 3. DNS
+        _installProgress.value = "[3/5] DNS..."
+        val dnsResult = setupDns()
+        if (dnsResult.isFailure) {
+            // DNS não é crítico o suficiente para abortar tudo
+            _installProgress.value = "[3/5] DNS aviso: ${dnsResult.exceptionOrNull()?.message}"
+        } else {
+            _installProgress.value = "[3/5] DNS OK"
+        }
+
+        // 4. Storage
+        _installProgress.value = "[4/5] Storage..."
+        val storageResult = setupStorage()
+        if (storageResult.isFailure) {
+            _installProgress.value = "[4/5] Storage aviso: ${storageResult.exceptionOrNull()?.message}"
+        } else {
+            _installProgress.value = "[4/5] Storage OK"
+        }
+
+        // 5. Bootstrap / dpkg
+        _installProgress.value = "[5/5] Bootstrap Debian (dpkg)..."
+        val bootstrapResult = runtime.ensureDebianBootstrap(force = false) { msg ->
+            _installProgress.value = "[5/5] $msg"
+        }
+        if (bootstrapResult.isFailure) {
+            _installProgress.value = "[5/5] Bootstrap aviso: ${bootstrapResult.exceptionOrNull()?.message}"
+        } else {
+            _installProgress.value = "[5/5] Bootstrap OK"
+        }
+
+        // Estado final
+        _rootFsStatus.value = rootFs.status()
+        val ready = runtime.isFullyReady()
+        _isReady.value = ready
+        LinuxConfig.setEnabled(ready)
+
+        if (ready) {
+            _statusMessage.value = "Linux ready (full-setup completo)"
+            _installProgress.value = "═══ full-setup CONCLUÍDO ═══"
+            return Result.success(Unit)
+        } else {
+            val msg = "full-setup terminou mas Linux ainda não está fully ready. Corre 'status'."
+            _statusMessage.value = msg
+            return Result.failure(IllegalStateException(msg))
         }
     }
 
