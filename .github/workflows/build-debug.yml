@@ -32,13 +32,12 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'tools platform-tools build-tools;34.0.0 platforms;android-34'
+          packages: ''
 
-      - name: Accept Android SDK licenses
+      - name: Install required SDK packages
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          # Fallback if the packages line above still tries obsolete 'tools'
-          sdkmanager --install "platform-tools" "build-tools;34.0.0" "platforms;android-34" || true
+          sdkmanager "platform-tools" "build-tools;34.0.0" "platforms;android-34"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
