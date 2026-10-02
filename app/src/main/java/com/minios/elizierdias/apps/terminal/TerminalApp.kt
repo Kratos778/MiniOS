@@ -33,11 +33,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.minios.elizierdias.linux.LinuxConfig
 import com.minios.elizierdias.linux.LinuxManager
-import com.minios.elizierdias.linux.LinuxRootFs
 import com.minios.elizierdias.linux.LinuxSession
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 @Composable
@@ -97,9 +94,16 @@ fun TerminalApp() {
         scrollToBottom()
     }
 
+    LaunchedEffect(installProgress) {
+        val msg = installProgress ?: return@LaunchedEffect
+        if (msg.isNotBlank()) {
+            lines.add(msg)
+            scrollToBottom()
+        }
+    }
+
     fun runBuiltin(cmd: String): Boolean {
-        val c = cmd.trim()
-        val lower = c.lowercase()
+        val lower = cmd.trim().lowercase()
         when {
             lower == "clear" || lower == "cls" -> {
                 lines.clear()
@@ -131,12 +135,13 @@ fun TerminalApp() {
                 scope.launch {
                     try {
                         append("=== full-setup ===")
-                        linuxManager.fullSetup { msg ->
-                            scope.launch(Dispatchers.Main) {
-                                append(msg)
-                            }
+                        val r = linuxManager.fullSetup()
+                        if (r.isSuccess) {
+                            append("=== full-setup CONCLUIDO ===")
+                            session = linuxManager.startSession()
+                        } else {
+                            append("error: ${r.exceptionOrNull()?.message}")
                         }
-                        append("=== fim full-setup ===")
                         append("")
                     } catch (e: Exception) {
                         append("error: ${e.message}")
@@ -154,9 +159,9 @@ fun TerminalApp() {
                 busy = true
                 scope.launch {
                     try {
-                        linuxManager.setupStorage { msg ->
-                            scope.launch(Dispatchers.Main) { append(msg) }
-                        }
+                        val r = linuxManager.setupStorage()
+                        if (r.isSuccess) append("setup-storage OK")
+                        else append("error: ${r.exceptionOrNull()?.message}")
                         append("")
                     } catch (e: Exception) {
                         append("error: ${e.message}")
@@ -186,7 +191,7 @@ fun TerminalApp() {
         scope.launch {
             try {
                 s.execute(trimmed) { line ->
-                    scope.launch(Dispatchers.Main) {
+                    scope.launch {
                         lines.add(line)
                         scrollToBottom()
                     }
