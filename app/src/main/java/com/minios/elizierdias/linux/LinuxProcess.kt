@@ -41,7 +41,14 @@ class LinuxProcessHandle(
 
     val pid: Int
         get() = try {
-            process?.pid()?.toInt() ?: -1
+            // Android's java.lang.Process often has no pid(); use reflection when available
+            val p = process ?: return -1
+            val m = p.javaClass.methods.firstOrNull { it.name == "pid" && it.parameterCount == 0 }
+            when (val v = m?.invoke(p)) {
+                is Long -> v.toInt()
+                is Int -> v
+                else -> -1
+            }
         } catch (_: Throwable) {
             -1
         }
