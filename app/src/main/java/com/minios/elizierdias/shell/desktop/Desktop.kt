@@ -45,7 +45,6 @@ import com.minios.elizierdias.apps.files.FilesApp
 import com.minios.elizierdias.apps.linuxgui.LinuxDesktopApp
 import com.minios.elizierdias.apps.media.MediaPlayerOS
 import com.minios.elizierdias.apps.settings.SettingsApp
-import com.minios.elizierdias.apps.settings.isVideoPath
 import com.minios.elizierdias.apps.softwarecenter.SoftwareCenterApp
 import com.minios.elizierdias.apps.terminal.TerminalApp
 import com.minios.elizierdias.core.MiniApp
@@ -54,38 +53,32 @@ import com.minios.elizierdias.core.PowerMode
 import com.minios.elizierdias.personalization.AnimatedWallpaper
 import com.minios.elizierdias.personalization.VideoWallpaper
 import com.minios.elizierdias.personalization.Wallpapers
-import com.minios.elizierdias.shell.exitMiniOS
-import com.minios.elizierdias.shell.mouse.VirtualMouse
 import com.minios.elizierdias.shell.startmenu.StartMenu
 import com.minios.elizierdias.shell.taskbar.Taskbar
 import com.minios.elizierdias.window.frame.WindowFrame
 import com.minios.elizierdias.window.manager.WindowManager
 import java.io.File
 
-private val TaskbarHeight = 30.dp
-
 @Composable
-fun Desktop() {
+fun Desktop(windowManager: WindowManager) {
     val context = LocalContext.current
-    val config = remember(context) { MiniOSConfig(context) }
-    val windowManager = remember { WindowManager() }
+    var showStartMenu by remember { mutableStateOf(false) }
+    var desktopSizePx by remember { mutableStateOf(Size(1080f, 1920f)) }
 
-    val wallpaperId by config.wallpaperId.collectAsState(initial = "default_gradient")
-    val wallpaperUri by config.wallpaperUri.collectAsState(initial = "")
-    val wallpaperVersion by config.wallpaperVersion.collectAsState(initial = 0L)
-    val wallpaperVideoSound by config.wallpaperVideoSound.collectAsState(initial = false)
-    val powerMode by config.powerMode.collectAsState(initial = PowerMode.BALANCED)
-    val wallpaper = Wallpapers.byId(wallpaperId)
+    val wallpaperId by MiniOSConfig.wallpaperIdFlow.collectAsState(initial = MiniOSConfig.wallpaperId)
+    val wallpaperUri by MiniOSConfig.wallpaperUriFlow.collectAsState(initial = MiniOSConfig.wallpaperUri)
+    val wallpaperVersion by MiniOSConfig.wallpaperVersionFlow.collectAsState(initial = MiniOSConfig.wallpaperVersion)
+    val wallpaperVideoSound by MiniOSConfig.wallpaperVideoSoundFlow.collectAsState(initial = MiniOSConfig.wallpaperVideoSound)
+    val powerMode by MiniOSConfig.powerModeFlow.collectAsState(initial = MiniOSConfig.powerMode)
 
-    var startMenuOpen by remember { mutableStateOf(false) }
-    var mouseEnabled by remember { mutableStateOf(false) }
-    var desktopSizePx by remember { mutableStateOf(Size(1280f, 676f)) }
+    val wallpaper = remember(wallpaperId) { Wallpapers.byId(wallpaperId) }
 
-    LaunchedEffect(desktopSizePx) {
-        windowManager.updateDesktopSize(desktopSizePx)
+    LaunchedEffect(Unit) {
+        MiniOSConfig.init(context)
     }
 
     fun launchApp(app: MiniApp) {
+        showStartMenu = false
         if (app.id == "smartplay") {
             val intent = context.packageManager.getLaunchIntentForPackage("com.appplayysmartt")
             if (intent != null) context.startActivity(intent)
@@ -96,23 +89,31 @@ fun Desktop() {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(0f),
+        ) {
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .clipToBounds()
-                    .onSizeChanged { sz ->
-                        desktopSizePx = Size(sz.width.toFloat(), sz.height.toFloat())
+                    .onSizeChanged { size ->
+                        if (size.width > 0 && size.height > 0) {
+                            desktopSizePx = Size(size.width.toFloat(), size.height.toFloat())
+                        }
                     },
             ) {
-                WallpaperBackground(
-                    wallpaper = wallpaper,
+                WallpaperLayer(
                     wallpaperUri = wallpaperUri,
                     wallpaperVersion = wallpaperVersion,
+                    gradientBrush = wallpaper.brush,
                     videoSound = wallpaperVideoSound,
+                    videoEnabled = powerMode != PowerMode.BATTERY_SAVER,
                 )
 
+                val icons = AppRegistry.desktopIcons
                 Column(
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -120,7 +121,7 @@ fun Desktop() {
                         .width(168.dp)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    AppRegistry.all.forEach { app ->
+                    icons.forEach { app ->
                         DesktopIcon(app = app, onOpen = { launchApp(app) })
                     }
                 }
@@ -144,62 +145,137 @@ fun Desktop() {
                                 when (window.app.id) {
                                     "files" -> FilesApp()
                                     "terminal" -> TerminalApp()
-                                    "linux_desktop" -> LinuxDesktopApp()
-                                    "settings" -> SettingsApp()
-                                    "software_center" -> SoftwareCenterApp()
                                     "browser" -> BrowserApp()
-                                    "media_player" -> MediaPlayerOS()
-                                    else -> Text("App: ${window.app.id}", color = Color.White)
+                                    "settings" -> SettingsApp()
+                                    "software" -> SoftwareCenterApp()
+                                    "media" -> MediaPlayerOS()
+                                    "linux-desktop" -> LinuxDesktopApp()
+                                    else -> Text(
+                                        "App: ${window.app.title}",
+                                        color = Color(0xFFC9D1D9),
+                                        modifier = Modifier.padding(16.dp),
+                                    )
                                 }
                             }
                         }
                     }
 
-                if (startMenuOpen) {
+                if (showStartMenu) {
                     StartMenu(
-                        apps = AppRegistry.all,
-                        onAppClick = { app ->
-                            startMenuOpen = false
-                            launchApp(app)
-                        },
-                        onDismiss = { startMenuOpen = false },
-                        onExitMiniOS = { exitMiniOS(context) },
+                        onDismiss = { showStartMenu = false },
+                        onOpenApp = { app -> launchApp(app) },
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 8.dp, bottom = 8.dp)
+                            .zIndex(10_000f),
                     )
                 }
             }
 
-            Box(
+            Taskbar(
+                windowManager = windowManager,
+                onStartClick = { showStartMenu = !showStartMenu },
+                startMenuOpen = showStartMenu,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(TaskbarHeight)
-                    .zIndex(200_000f),
-            ) {
-                Taskbar(
-                    openWindows = windowManager.windows,
-                    mouseEnabled = mouseEnabled,
-                    onMouseToggle = { mouseEnabled = it },
-                    onStartClick = { startMenuOpen = !startMenuOpen },
-                    onWindowClick = { id ->
-                        val window = windowManager.windows.firstOrNull { it.instanceId == id }
-                            ?: return@Taskbar
-                        if (window.isFocused && !window.isMinimized) {
-                            windowManager.minimize(id)
-                        } else {
-                            windowManager.restore(id)
-                        }
-                    },
-                    onExitMiniOS = { exitMiniOS(context) },
+                    .height(48.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun WallpaperLayer(
+    wallpaperUri: String,
+    wallpaperVersion: Long,
+    gradientBrush: Brush,
+    videoSound: Boolean,
+    videoEnabled: Boolean,
+) {
+    val context = LocalContext.current
+    val lower = wallpaperUri.lowercase()
+    val isVideo = lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mkv")
+    val isGif = lower.endsWith(".gif")
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (isVideo && videoEnabled) {
+            key(wallpaperUri, wallpaperVersion) {
+                VideoWallpaper(
+                    source = wallpaperUri,
+                    contentKey = wallpaperVersion,
+                    modifier = Modifier.fillMaxSize(),
+                    soundEnabled = videoSound,
+                    enabled = true,
                 )
             }
+        } else if (isGif) {
+            key(wallpaperUri, wallpaperVersion) {
+                AnimatedWallpaper(
+                    source = wallpaperUri,
+                    contentKey = wallpaperVersion,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        } else if (wallpaperUri.isNotBlank()) {
+            key(wallpaperUri, wallpaperVersion) {
+                val file = File(wallpaperUri)
+                val model = if (file.exists()) {
+                    ImageRequest.Builder(context)
+                        .data(file)
+                        .memoryCacheKey("wp-$wallpaperVersion")
+                        .diskCacheKey("wp-$wallpaperVersion")
+                        .crossfade(true)
+                        .build()
+                } else {
+                    ImageRequest.Builder(context)
+                        .data(wallpaperUri)
+                        .memoryCacheKey("wp-$wallpaperVersion")
+                        .crossfade(true)
+                        .build()
+                }
+                AsyncImage(
+                    model = model,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(gradientBrush),
+            )
         }
+    }
+}
 
-        VirtualMouse(
-            enabled = mouseEnabled,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = TaskbarHeight)
-                .zIndex(300_000f),
-            windowManager = windowManager,
+@Composable
+private fun DesktopIcon(
+    app: MiniApp,
+    onOpen: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .padding(vertical = 6.dp)
+            .width(72.dp)
+            .clickable(onClick = onOpen),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            imageVector = app.icon,
+            contentDescription = app.title,
+            tint = Color(0xFFE6EDF3),
+            modifier = Modifier.size(36.dp),
+        )
+        Text(
+            text = app.title,
+            color = Color(0xFFE6EDF3),
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
