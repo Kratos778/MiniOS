@@ -45,12 +45,6 @@ import androidx.compose.ui.zIndex
 import com.minios.elizierdias.core.MiniWindow
 import com.minios.elizierdias.window.manager.WindowManager
 
-private enum class ResizeEdge {
-    RIGHT,
-    BOTTOM,
-    BOTTOM_RIGHT,
-}
-
 @Composable
 fun WindowFrame(
     window: MiniWindow,
@@ -62,16 +56,23 @@ fun WindowFrame(
     onToggleMaximize: () -> Unit,
     content: @Composable () -> Unit,
 ) {
+    // Minimized windows are not drawn (Desktop filters them). Safety guard:
+    if (window.isMinimized) return
+
     val density = LocalDensity.current
     val windowWidth = with(density) { window.size.width.toDp() }
     val windowHeight = with(density) { window.size.height.toDp() }
 
+    // Live size holder so drag gestures do not restart when size changes
+    val sizeHolder = remember(window.instanceId) { mutableStateOf(window.size) }
+    sizeHolder.value = window.size
+    val posHolder = remember(window.instanceId) { mutableStateOf(window.position) }
+    posHolder.value = window.position
+
     var dragPos by remember(window.instanceId) { mutableStateOf(window.position) }
 
-    val frameModifier = if (window.isMinimized) {
-        Modifier.size(0.dp)
-    } else {
-        Modifier
+    Box(
+        modifier = Modifier
             .offset { IntOffset(window.position.x.toInt(), window.position.y.toInt()) }
             .size(width = windowWidth, height = windowHeight)
             .zIndex(window.zIndex.toFloat())
@@ -95,134 +96,145 @@ fun WindowFrame(
                         }
                     }
                 }
-            }
-    }
-
-    Box(modifier = frameModifier) {
+            },
+    ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            if (!window.isMinimized) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(36.dp)
-                        .background(
-                            if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128),
+            // Title bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(36.dp)
+                    .background(
+                        if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128),
+                    )
+                    .pointerInput(window.instanceId, window.isMaximized) {
+                        detectDragGestures(
+                            onDragStart = {
+                                onFocus()
+                                dragPos = posHolder.value
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                if (window.isMaximized) return@detectDragGestures
+                                dragPos += dragAmount
+                                onMove(dragPos)
+                            },
                         )
-                        .pointerInput(window.instanceId, window.isMaximized) {
-                            detectDragGestures(
-                                onDragStart = {
-                                    onFocus()
-                                    dragPos = window.position
-                                },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    dragPos += dragAmount
-                                    onMove(dragPos)
-                                },
-                            )
-                        }
-                        .padding(horizontal = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = window.app.title,
+                    color = Color(0xFFE6EDF3),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onMinimize, modifier = Modifier.size(28.dp)) {
                     Icon(
-                        imageVector = window.app.icon,
-                        contentDescription = null,
-                        tint = Color(0xFFC9D1D9),
-                        modifier = Modifier
-                            .padding(start = 4.dp)
-                            .size(16.dp),
+                        Icons.Filled.Minimize,
+                        contentDescription = "Minimize",
+                        tint = Color(0xFF8B949E),
+                        modifier = Modifier.size(14.dp),
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = window.app.title,
-                        color = Color(0xFFC9D1D9),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
+                }
+                IconButton(onClick = onToggleMaximize, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Filled.CropSquare,
+                        contentDescription = if (window.isMaximized) "Restore" else "Maximize",
+                        tint = if (window.isMaximized) Color(0xFF58A6FF) else Color(0xFF8B949E),
+                        modifier = Modifier.size(14.dp),
                     )
-                    IconButton(onClick = onMinimize, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            Icons.Filled.Minimize,
-                            "Minimize",
-                            tint = Color(0xFF8B949E),
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
-                    IconButton(onClick = onToggleMaximize, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            Icons.Filled.CropSquare,
-                            if (window.isMaximized) "Restore" else "Maximize",
-                            tint = if (window.isMaximized) Color(0xFF58A6FF) else Color(0xFF8B949E),
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
-                    IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            Icons.Filled.Close,
-                            "Close",
-                            tint = Color(0xFFF85149),
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
+                }
+                IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "Close",
+                        tint = Color(0xFFF85149),
+                        modifier = Modifier.size(14.dp),
+                    )
                 }
             }
 
+            // Content
             Box(
-                modifier = if (window.isMinimized) {
-                    Modifier.size(0.dp)
-                } else {
-                    Modifier.weight(1f).fillMaxWidth()
-                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
             ) {
                 content()
             }
         }
 
-        if (!window.isMinimized && !window.isMaximized) {
-            // Borda direita (fina, área de arrasto)
-            ResizeHandle(
-                edge = ResizeEdge.RIGHT,
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .width(14.dp)
-                    .fillMaxHeight()
-                    .padding(top = 36.dp, bottom = 28.dp),
-                windowSize = window.size,
-                onFocus = onFocus,
-                onResize = onResize,
-            )
-            // Borda inferior
-            ResizeHandle(
-                edge = ResizeEdge.BOTTOM,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(14.dp)
-                    .padding(end = 28.dp),
-                windowSize = window.size,
-                onFocus = onFocus,
-                onResize = onResize,
-            )
-            // Canto inferior-direito com grip visível
+        // Resize handles (only when not maximized)
+        if (!window.isMaximized) {
+            // Right edge
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .size(28.dp)
-                    .pointerInput(window.instanceId, window.size.width, window.size.height) {
-                        var startW = window.size.width
-                        var startH = window.size.height
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .width(10.dp)
+                    .pointerInput(window.instanceId) {
+                        var w = sizeHolder.value.width
+                        var h = sizeHolder.value.height
                         detectDragGestures(
                             onDragStart = {
                                 onFocus()
-                                startW = window.size.width
-                                startH = window.size.height
+                                w = sizeHolder.value.width
+                                h = sizeHolder.value.height
                             },
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                startW = (startW + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
-                                startH = (startH + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
-                                onResize(Size(startW, startH))
+                                w = (w + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
+                                onResize(Size(w, h))
+                            },
+                        )
+                    },
+            )
+            // Bottom edge
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .pointerInput(window.instanceId) {
+                        var w = sizeHolder.value.width
+                        var h = sizeHolder.value.height
+                        detectDragGestures(
+                            onDragStart = {
+                                onFocus()
+                                w = sizeHolder.value.width
+                                h = sizeHolder.value.height
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                h = (h + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
+                                onResize(Size(w, h))
+                            },
+                        )
+                    },
+            )
+            // Blue corner block — larger hit area, smooth drag
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(36.dp)
+                    .pointerInput(window.instanceId) {
+                        var w = sizeHolder.value.width
+                        var h = sizeHolder.value.height
+                        detectDragGestures(
+                            onDragStart = {
+                                onFocus()
+                                w = sizeHolder.value.width
+                                h = sizeHolder.value.height
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                w = (w + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
+                                h = (h + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
+                                onResize(Size(w, h))
                             },
                         )
                     },
@@ -231,52 +243,13 @@ fun WindowFrame(
                 Box(
                     modifier = Modifier
                         .padding(4.dp)
-                        .size(14.dp)
+                        .size(16.dp)
                         .background(
-                            color = if (window.isFocused) Color(0xFF58A6FF) else Color(0xFF484F58),
-                            shape = RoundedCornerShape(2.dp),
+                            color = if (window.isFocused) Color(0xFF58A6FF) else Color(0xFF6E7681),
+                            shape = RoundedCornerShape(3.dp),
                         ),
                 )
             }
         }
     }
-}
-
-@Composable
-private fun ResizeHandle(
-    edge: ResizeEdge,
-    modifier: Modifier,
-    windowSize: Size,
-    onFocus: () -> Unit,
-    onResize: (Size) -> Unit,
-) {
-    Box(
-        modifier = modifier.pointerInput(edge, windowSize.width, windowSize.height) {
-            var startW = windowSize.width
-            var startH = windowSize.height
-            detectDragGestures(
-                onDragStart = {
-                    onFocus()
-                    startW = windowSize.width
-                    startH = windowSize.height
-                },
-                onDrag = { change, dragAmount ->
-                    change.consume()
-                    when (edge) {
-                        ResizeEdge.RIGHT -> {
-                            startW = (startW + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
-                        }
-                        ResizeEdge.BOTTOM -> {
-                            startH = (startH + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
-                        }
-                        ResizeEdge.BOTTOM_RIGHT -> {
-                            startW = (startW + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
-                            startH = (startH + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
-                        }
-                    }
-                    onResize(Size(startW, startH))
-                },
-            )
-        },
-    )
 }
