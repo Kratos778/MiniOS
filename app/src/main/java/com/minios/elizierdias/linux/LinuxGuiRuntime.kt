@@ -117,7 +117,7 @@ class LinuxGuiRuntime(
             |pkill -9 -f Xvnc 2>/dev/null || true
             |rm -f /tmp/.X1-lock /tmp/.X11-unix/X1 /root/.vnc/*.pid /root/.vnc/localhost:1.pid 2>/dev/null || true
             |sleep 1
-            |vncserver :1 -geometry $geo -depth 24 -localhost yes -SecurityTypes None -xstartup /root/.vnc/xstartup
+            |vncserver :1 -geometry $geo -depth 16 -localhost yes -SecurityTypes None -xstartup /root/.vnc/xstartup
             |sleep 0.5
             |vncserver -list
             """.trimMargin(),
@@ -299,7 +299,7 @@ class LinuxGuiRuntime(
                 val viaScript =
                     "export HOME=/root USER=root PATH=/usr/local/bin:/usr/bin:/bin; " +
                         "if [ -x /usr/local/bin/start-vnc ]; then /usr/local/bin/start-vnc; " +
-                        "else vncserver $displayName -geometry $geo -depth 24 " +
+                        "else vncserver $displayName -geometry $geo -depth 16 " +
                         "-localhost yes -SecurityTypes None -xstartup /root/.vnc/xstartup; fi 2>&1"
 
                 val r = runtime.exec(viaScript, timeoutSec = 90)
@@ -321,7 +321,7 @@ class LinuxGuiRuntime(
                 cleanStaleLocks()
                 val cmd =
                     "export HOME=/root USER=root; " +
-                        "vncserver $displayName -geometry $geo -depth 24 " +
+                        "vncserver $displayName -geometry $geo -depth 16 " +
                         "-localhost yes -SecurityTypes None " +
                         "-xstartup /root/.vnc/xstartup 2>&1"
                 val r2 = runtime.exec(cmd, timeoutSec = 90)
