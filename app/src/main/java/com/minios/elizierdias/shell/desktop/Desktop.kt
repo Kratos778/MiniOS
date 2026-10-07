@@ -16,7 +16,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -53,32 +52,37 @@ import com.minios.elizierdias.core.PowerMode
 import com.minios.elizierdias.personalization.AnimatedWallpaper
 import com.minios.elizierdias.personalization.VideoWallpaper
 import com.minios.elizierdias.personalization.Wallpapers
+import com.minios.elizierdias.shell.mouse.VirtualMouse
 import com.minios.elizierdias.shell.startmenu.StartMenu
 import com.minios.elizierdias.shell.taskbar.Taskbar
 import com.minios.elizierdias.window.frame.WindowFrame
 import com.minios.elizierdias.window.manager.WindowManager
 import java.io.File
 
+private fun isVideoPath(path: String): Boolean {
+    val lower = path.lowercase()
+    return lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mkv")
+}
+
 @Composable
-fun Desktop(windowManager: WindowManager) {
+fun Desktop() {
     val context = LocalContext.current
-    var showStartMenu by remember { mutableStateOf(false) }
-    var desktopSizePx by remember { mutableStateOf(Size(1080f, 1920f)) }
+    val windowManager = remember { WindowManager() }
+    var startMenuOpen by remember { mutableStateOf(false) }
+    var mouseEnabled by remember { mutableStateOf(true) }
+    var desktopSizePx by remember { mutableStateOf(Size(1280f, 720f)) }
 
-    val wallpaperId by MiniOSConfig.wallpaperIdFlow.collectAsState(initial = MiniOSConfig.wallpaperId)
-    val wallpaperUri by MiniOSConfig.wallpaperUriFlow.collectAsState(initial = MiniOSConfig.wallpaperUri)
-    val wallpaperVersion by MiniOSConfig.wallpaperVersionFlow.collectAsState(initial = MiniOSConfig.wallpaperVersion)
-    val wallpaperVideoSound by MiniOSConfig.wallpaperVideoSoundFlow.collectAsState(initial = MiniOSConfig.wallpaperVideoSound)
-    val powerMode by MiniOSConfig.powerModeFlow.collectAsState(initial = MiniOSConfig.powerMode)
+    val config = remember(context) { MiniOSConfig(context) }
 
-    val wallpaper = remember(wallpaperId) { Wallpapers.byId(wallpaperId) }
-
-    LaunchedEffect(Unit) {
-        MiniOSConfig.init(context)
-    }
+    val wallpaperId by config.wallpaperId.collectAsState(initial = "default_gradient")
+    val wallpaperUri by config.wallpaperUri.collectAsState(initial = "")
+    val wallpaperVersion by config.wallpaperVersion.collectAsState(initial = 0L)
+    val wallpaperVideoSound by config.wallpaperVideoSound.collectAsState(initial = false)
+    val powerMode by config.powerMode.collectAsState(initial = PowerMode.BALANCED)
+    val wallpaper = Wallpapers.byId(wallpaperId)
 
     fun launchApp(app: MiniApp) {
-        showStartMenu = false
+        startMenuOpen = false
         if (app.id == "smartplay") {
             val intent = context.packageManager.getLaunchIntentForPackage("com.appplayysmartt")
             if (intent != null) context.startActivity(intent)
@@ -101,7 +105,9 @@ fun Desktop(windowManager: WindowManager) {
                     .clipToBounds()
                     .onSizeChanged { size ->
                         if (size.width > 0 && size.height > 0) {
-                            desktopSizePx = Size(size.width.toFloat(), size.height.toFloat())
+                            val s = Size(size.width.toFloat(), size.height.toFloat())
+                            desktopSizePx = s
+                            windowManager.updateDesktopSize(s)
                         }
                     },
             ) {
@@ -160,9 +166,9 @@ fun Desktop(windowManager: WindowManager) {
                         }
                     }
 
-                if (showStartMenu) {
+                if (startMenuOpen) {
                     StartMenu(
-                        onDismiss = { showStartMenu = false },
+                        onDismiss = { startMenuOpen = false },
                         onOpenApp = { app -> launchApp(app) },
                         modifier = Modifier
                             .align(Alignment.BottomStart)
@@ -173,14 +179,32 @@ fun Desktop(windowManager: WindowManager) {
             }
 
             Taskbar(
-                windowManager = windowManager,
-                onStartClick = { showStartMenu = !showStartMenu },
-                startMenuOpen = showStartMenu,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
+                openWindows = windowManager.windows,
+                mouseEnabled = mouseEnabled,
+                onMouseToggle = { mouseEnabled = it },
+                onStartClick = { startMenuOpen = !startMenuOpen },
+                onWindowClick = { id ->
+                    val window = windowManager.windows.firstOrNull { it.instanceId == id }
+                        ?: return@Taskbar
+                    if (window.isFocused && !window.isMinimized) {
+                        windowManager.minimize(id)
+                    } else {
+                        windowManager.restore(id)
+                    }
+                },
+                onExitMiniOS = {
+                    (context as? android.app.Activity)?.finish()
+                },
             )
         }
+
+        VirtualMouse(
+            enabled = mouseEnabled,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(bottom = 44.dp)
+                .zIndex(100_000f),
+        )
     }
 }
 
@@ -193,13 +217,12 @@ private fun WallpaperLayer(
     videoEnabled: Boolean,
 ) {
     val context = LocalContext.current
-    val lower = wallpaperUri.lowercase()
-    val isVideo = lower.endsWith(".mp4") || lower.endsWith(".webm") || lower.endsWith(".mkv")
-    val isGif = lower.endsWith(".gif")
+    val isGif = wallpaperUri.endsWith(".gif", ignoreCase = true)
+    val isVideo = isVideoPath(wallpaperUri)
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (isVideo && videoEnabled) {
-            key(wallpaperUri, wallpaperVersion) {
+            key(wallpaperUri, wallpaperVersion, videoSound) {
                 VideoWallpaper(
                     source = wallpaperUri,
                     contentKey = wallpaperVersion,
