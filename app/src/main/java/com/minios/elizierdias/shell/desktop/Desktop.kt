@@ -153,9 +153,9 @@ fun Desktop() {
                                     "terminal" -> TerminalApp()
                                     "browser" -> BrowserApp()
                                     "settings" -> SettingsApp()
-                                    "software" -> SoftwareCenterApp()
-                                    "media" -> MediaPlayerOS()
-                                    "linux-desktop" -> LinuxDesktopApp()
+                                    "software_center" -> SoftwareCenterApp()
+                                    "media_player" -> MediaPlayerOS()
+                                    "linux_desktop" -> LinuxDesktopApp()
                                     else -> Text(
                                         "App: ${window.app.title}",
                                         color = Color(0xFFC9D1D9),
@@ -168,12 +168,15 @@ fun Desktop() {
 
                 if (startMenuOpen) {
                     StartMenu(
+                        apps = AppRegistry.all,
+                        onAppClick = { app ->
+                            startMenuOpen = false
+                            launchApp(app)
+                        },
                         onDismiss = { startMenuOpen = false },
-                        onOpenApp = { app -> launchApp(app) },
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(start = 8.dp, bottom = 8.dp)
-                            .zIndex(10_000f),
+                        onExitMiniOS = {
+                            (context as? android.app.Activity)?.finish()
+                        },
                     )
                 }
             }
