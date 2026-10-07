@@ -57,8 +57,8 @@ import kotlinx.coroutines.delay
 
 /**
  * Viewer RFB — mecânica alinhada ao rato do desktop NoskOS (trackpad):
- * - Arrastar = move o cursor SEM clicar
- * - Toque = clique esquerdo na posicao do cursor
+ * - Arrastar = move o cursor SEM clicar (trackpad local)
+ * - Toque = clique esquerdo na posicao do evento (absoluto — compativel com VirtualMouse)
  * - Duplo toque = 2x esquerdo
  * - Toque longo = clique direito
  * - Botao L = manter esquerdo (arrastar janelas)
@@ -264,17 +264,17 @@ fun RfbViewer(
 
                     detectTapGestures(
                         onTap = {
-                            // Clique esquerdo na posicao do cursor (nao no dedo)
-                            val cx = if (cursorX >= 0f) cursorX else it.x
-                            val cy = if (cursorY >= 0f) cursorY else it.y
+                            // Clique absoluto na posicao do evento (VirtualMouse injecta aqui)
+                            val cx = it.x
+                            val cy = it.y
                             cursorX = cx
                             cursorY = cy
                             cursorVisible = true
                             sendClick(1, cx, cy, vw, vh)
                         },
                         onDoubleTap = {
-                            val cx = if (cursorX >= 0f) cursorX else it.x
-                            val cy = if (cursorY >= 0f) cursorY else it.y
+                            val cx = it.x
+                            val cy = it.y
                             cursorX = cx
                             cursorY = cy
                             cursorVisible = true
@@ -282,8 +282,8 @@ fun RfbViewer(
                             sendClick(1, cx, cy, vw, vh)
                         },
                         onLongPress = {
-                            val cx = if (cursorX >= 0f) cursorX else it.x
-                            val cy = if (cursorY >= 0f) cursorY else it.y
+                            val cx = it.x
+                            val cy = it.y
                             cursorX = cx
                             cursorY = cy
                             cursorVisible = true
@@ -323,204 +323,144 @@ fun RfbViewer(
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     val cx = cursorX
                     val cy = cursorY
-                    val fill = when {
-                        lmbHold -> Color(0xFFFFCCCC)
-                        rmbHold -> Color(0xFFCCFFCC)
-                        else -> Color(0xFFFFFFFF)
-                    }
-                    val edge = Color(0xFF222222)
                     val path = Path().apply {
                         moveTo(cx, cy)
-                        lineTo(cx + 14f, cy + 22f)
-                        lineTo(cx + 6f, cy + 20f)
-                        lineTo(cx + 10f, cy + 32f)
-                        lineTo(cx + 4f, cy + 34f)
-                        lineTo(cx, cy + 22f)
+                        lineTo(cx, cy + 18.dp.toPx())
+                        lineTo(cx + 5.dp.toPx(), cy + 14.dp.toPx())
+                        lineTo(cx + 10.dp.toPx(), cy + 22.dp.toPx())
+                        lineTo(cx + 12.dp.toPx(), cy + 20.dp.toPx())
+                        lineTo(cx + 7.dp.toPx(), cy + 12.dp.toPx())
+                        lineTo(cx + 14.dp.toPx(), cy + 12.dp.toPx())
                         close()
                     }
-                    drawPath(path, color = fill)
-                    drawPath(path, color = edge, style = Stroke(width = 1.4f))
+                    drawPath(path, Color.Black, style = Stroke(width = 3.dp.toPx()))
+                    drawPath(path, Color.White)
                 }
             }
         }
 
-        if (active) {
-            BasicTextField(
-                value = imeText,
-                onValueChange = { new ->
-                    if (new.length > imeText.length) {
-                        new.substring(imeText.length).forEach { sendChar(it) }
-                    } else if (new.length < imeText.length) {
-                        repeat((imeText.length - new.length).coerceAtMost(32)) {
-                            tapKey(0xff08)
-                        }
-                    }
-                    imeText = " "
-                },
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .padding(0.dp)
-                    .focusRequester(focusRequester),
-                textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
-                cursorBrush = SolidColor(Color.Transparent),
-            )
-        }
-
-        if (active) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(6.dp),
-                horizontalAlignment = Alignment.End,
-            ) {
-                if (showKeys) {
-                    SpecialKeysPanel(
-                        gamerMode = gamerMode,
-                        onKey = { tapKey(it) },
-                        onModKey = { mod, key -> tapModKey(mod, key) },
-                        onToggleGamer = { gamerMode = !gamerMode },
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = if (lmbHold) "L●" else "L",
-                        color = if (lmbHold) Color(0xFFF85149) else Color(0xFFC9D1D9),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier
-                            .background(
-                                if (lmbHold) Color(0xCC3D1F1F) else Color(0xCC161B22),
-                                RoundedCornerShape(4.dp),
-                            )
-                            .clickable {
-                                lmbHold = !lmbHold
-                                if (rmbHold && lmbHold) rmbHold = false
-                                val vw = viewSize.width.toFloat().coerceAtLeast(1f)
-                                val vh = viewSize.height.toFloat().coerceAtLeast(1f)
-                                if (cursorX >= 0f) sendMove(cursorX, cursorY, vw, vh)
-                            }
-                            .padding(horizontal = 8.dp, vertical = 5.dp),
-                    )
-                    Text(
-                        text = if (rmbHold) "R●" else "R",
-                        color = if (rmbHold) Color(0xFF3FB950) else Color(0xFFC9D1D9),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier
-                            .background(
-                                if (rmbHold) Color(0xCC1F3D2A) else Color(0xCC161B22),
-                                RoundedCornerShape(4.dp),
-                            )
-                            .clickable {
-                                rmbHold = !rmbHold
-                                if (lmbHold && rmbHold) lmbHold = false
-                                val vw = viewSize.width.toFloat().coerceAtLeast(1f)
-                                val vh = viewSize.height.toFloat().coerceAtLeast(1f)
-                                if (cursorX >= 0f) sendMove(cursorX, cursorY, vw, vh)
-                            }
-                            .padding(horizontal = 8.dp, vertical = 5.dp),
-                    )
-                    TinyBtn("⌨") { openKeyboard() }
-                    TinyBtn("⏎") { tapKey(0xff0d) }
-                    TinyBtn("⌫") { tapKey(0xff08) }
-                    TinyBtn(if (showKeys) "▾" else "⌨+") { showKeys = !showKeys }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TinyBtn(label: String, onClick: () -> Unit) {
-    Text(
-        text = label,
-        color = Color(0xFFC9D1D9),
-        fontSize = 11.sp,
-        fontFamily = FontFamily.Monospace,
-        modifier = Modifier
-            .background(Color(0xCC161B22), RoundedCornerShape(4.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 5.dp),
-    )
-}
-
-@Composable
-private fun SpecialKeysPanel(
-    gamerMode: Boolean,
-    onKey: (Int) -> Unit,
-    onModKey: (Int, Int) -> Unit,
-    onToggleGamer: () -> Unit,
-) {
-    val scroll = rememberScrollState()
-    Column(
-        modifier = Modifier
-            .padding(bottom = 4.dp)
-            .background(Color(0xE0161B22), RoundedCornerShape(6.dp))
-            .padding(6.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = if (gamerMode) "Gamer" else "Teclas",
-                color = Color(0xFF58A6FF),
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-            )
-            Text(
-                text = if (gamerMode) "Normal" else "Gamer",
-                color = Color(0xFF3FB950),
-                fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.clickable(onClick = onToggleGamer),
-            )
-        }
+        // Bottom controls
         Row(
             modifier = Modifier
-                .horizontalScroll(scroll)
-                .padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Color(0xCC0D1117))
+                .padding(horizontal = 6.dp, vertical = 4.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            val vw = viewSize.width.toFloat().coerceAtLeast(1f)
+            val vh = viewSize.height.toFloat().coerceAtLeast(1f)
             Text(
-                text = "Close",
-                color = Color(0xFFFF7B72),
-                fontSize = 10.sp,
+                text = if (lmbHold) "L●" else "L",
+                color = if (lmbHold) Color(0xFF3FB950) else Color(0xFFC9D1D9),
+                fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier
-                    .background(Color(0xFF3D1F1F), RoundedCornerShape(3.dp))
-                    .clickable { onModKey(0xffe9, 0xffc1) }
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                    .background(
+                        if (lmbHold) Color(0xFF238636) else Color(0xFF21262D),
+                        RoundedCornerShape(4.dp),
+                    )
+                    .clickable {
+                        lmbHold = !lmbHold
+                        if (cursorX >= 0f) sendMove(cursorX, cursorY, vw, vh)
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
             )
-            val keys = if (gamerMode) {
-                listOf(
-                    "Tab" to 0xff09, "Esc" to 0xff1b,
-                    "↑" to 0xff52, "↓" to 0xff54, "←" to 0xff51, "→" to 0xff53,
-                    "Ctrl" to 0xffe3, "Alt" to 0xffe9, "Spc" to 0x20,
-                )
-            } else {
-                listOf(
-                    "Tab" to 0xff09, "Esc" to 0xff1b, "⇧" to 0xffe1,
-                    "Ctrl" to 0xffe3, "Alt" to 0xffe9,
-                    "↑" to 0xff52, "↓" to 0xff54, "←" to 0xff51, "→" to 0xff53,
-                    "F1" to 0xffbe, "F2" to 0xffbf, "F3" to 0xffc0, "F4" to 0xffc1,
-                    "F5" to 0xffc2, "F6" to 0xffc3, "F7" to 0xffc4, "F8" to 0xffc5,
-                    "F9" to 0xffc6, "F10" to 0xffc7, "F11" to 0xffc8, "F12" to 0xffc9,
-                )
-            }
-            keys.forEach { (label, sym) ->
-                Text(
-                    text = label,
-                    color = Color(0xFFE6EDF3),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier
-                        .background(Color(0xFF21262D), RoundedCornerShape(3.dp))
-                        .clickable { onKey(sym) }
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                )
+            Text(
+                text = if (rmbHold) "R●" else "R",
+                color = if (rmbHold) Color(0xFF58A6FF) else Color(0xFFC9D1D9),
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .background(
+                        if (rmbHold) Color(0xFF1F6FEB) else Color(0xFF21262D),
+                        RoundedCornerShape(4.dp),
+                    )
+                    .clickable {
+                        rmbHold = !rmbHold
+                        if (cursorX >= 0f) sendMove(cursorX, cursorY, vw, vh)
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+            Text(
+                text = "⌨",
+                color = Color(0xFFC9D1D9),
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .background(Color(0xFF21262D), RoundedCornerShape(4.dp))
+                    .clickable { openKeyboard() }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+            Text(
+                text = if (showKeys) "keys▾" else "keys",
+                color = Color(0xFF8B949E),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .background(Color(0xFF21262D), RoundedCornerShape(4.dp))
+                    .clickable { showKeys = !showKeys }
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+            Text(
+                text = status,
+                color = Color(0xFF8B949E),
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                modifier = Modifier.padding(start = 4.dp),
+            )
+        }
+
+        if (showKeys) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(bottom = 40.dp, start = 6.dp)
+                    .background(Color(0xEE161B22), RoundedCornerShape(6.dp))
+                    .padding(6.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(
+                        "Esc" to 0xff1b,
+                        "Tab" to 0xff09,
+                        "Enter" to 0xff0d,
+                        "Bksp" to 0xff08,
+                    ).forEach { (label, key) ->
+                        Text(
+                            text = label,
+                            color = Color.White,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier
+                                .background(Color(0xFF21262D), RoundedCornerShape(4.dp))
+                                .clickable { tapKey(key) }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                        )
+                    }
+                }
             }
         }
+
+        // Hidden IME field for keyboard input
+        BasicTextField(
+            value = imeText,
+            onValueChange = { new ->
+                if (new.length > imeText.length) {
+                    val added = new.substring(imeText.length)
+                    added.forEach { sendChar(it) }
+                } else if (new.length < imeText.length) {
+                    repeat(imeText.length - new.length) { tapKey(0xff08) }
+                }
+                imeText = " "
+            },
+            modifier = Modifier
+                .focusRequester(focusRequester)
+                .fillMaxWidth()
+                .padding(0.dp),
+            textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
+            cursorBrush = SolidColor(Color.Transparent),
+        )
     }
 }
