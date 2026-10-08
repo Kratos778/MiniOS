@@ -116,7 +116,17 @@ fun LinuxDesktopApp() {
                 },
                 onStart = {
                     runBusy {
-                        // Sempre hard reset + start (nunca confiar em sessao antiga)
+                        // Soft start: se ja estiver activo e saudavel, nao mata a sessao.
+                        // Hard reset so se parado ou stale.
+                        val current = gui.status()
+                        if (current.running && !current.message.contains("stale", ignoreCase = true)) {
+                            running = true
+                            geometry = current.geometry
+                            statusMsg = current.message
+                            append("[GUI] VNC ja activo — a reutilizar sessao (sem reset)")
+                            append(current.message)
+                            return@runBusy
+                        }
                         append("[GUI] Reset + iniciar VNC $geometry...")
                         gui.stop()
                         val r = gui.start(geometry)
