@@ -67,8 +67,15 @@ fun TerminalApp() {
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     val lines = remember { mutableStateListOf<String>() }
+    var session by remember { mutableStateOf<LinuxSession?>(null) }
+    var promptCwd by remember { mutableStateOf("/root") }
 
-    fun prompt(): String = if (isReady) "root@noskos:~# " else "noskos$ "
+    fun prompt(): String =
+        when {
+            busy -> "[busy] "
+            isReady -> "root@noskos:$promptCwd# "
+            else -> "noskos$ "
+        }
 
     fun scrollToBottom() {
         scope.launch {
@@ -84,6 +91,10 @@ fun TerminalApp() {
 
     LaunchedEffect(Unit) {
         linuxManager.initialize()
+        if (linuxManager.isReady.value) {
+            session = linuxManager.startSession()
+            promptCwd = session?.cwd ?: "/root"
+        }
         lines.clear()
         lines.add("NoskOS Terminal")
         lines.add("status: $statusMessage")
@@ -106,14 +117,14 @@ fun TerminalApp() {
         }
     }
 
-    fun run(cmdRaw: String) {
-        val cmd = cmdRaw.trim()
-        if (cmd.isEmpty() || busy) return
-        lines.add(prompt() + cmd)
+    fun run(cmd: String) {
+        val trimmed = cmd.trim()
+        if (trimmed.isEmpty() || busy) return
+        lines.add(prompt() + trimmed)
         busy = true
         scope.launch(Dispatchers.IO) {
             try {
-                when (cmd.lowercase()) {
+                when (trimmed.lowercase()) {
                     "help" -> {
                         lines.add("Comandos:")
                         lines.add("  full-setup / setup-all / wizard")
@@ -141,6 +152,8 @@ fun TerminalApp() {
                         val r = linuxManager.fullSetup()
                         if (r.isSuccess) {
                             lines.add("full-setup OK — Linux pronto")
+                            session = linuxManager.startSession()
+                            promptCwd = session?.cwd ?: "/root"
                         } else {
                             lines.add("full-setup FALHOU: ${r.exceptionOrNull()?.message}")
                         }
@@ -164,23 +177,20 @@ fun TerminalApp() {
                     "reinstall" -> {
                         val r = linuxManager.reinstallRootFs()
                         lines.add(if (r.isSuccess) "reinstall OK" else "FALHOU: ${r.exceptionOrNull()?.message}")
+                        if (r.isSuccess) {
+                            session = null
+                        }
                     }
                     else -> {
+                        // Shell via session
                         if (!linuxManager.isReady.value) {
                             lines.add("RootFS nao pronto. Corre: full-setup")
                         } else {
-                            val session = LinuxSession(linuxManager.getRuntime())
-                            val r = session.exec(cmd)
-                            val out = r.getOrNull()
-                            if (out != null) {
-                                if (out.stdout.isNotBlank()) out.stdout.lines().forEach { lines.add(it) }
-                                if (out.stderr.isNotBlank()) out.stderr.lines().forEach { lines.add("[err] $it") }
-                                if (out.stdout.isBlank() && out.stderr.isBlank()) {
-                                    lines.add("(sem output, exit=${out.exitCode})")
-                                }
-                            } else {
-                                lines.add("ERRO: ${r.exceptionOrNull()?.message}")
+                            val s = session ?: linuxManager.startSession().also { session = it }
+                            s.execute(trimmed) { line ->
+                                lines.add(line)
                             }
+                            promptCwd = s.cwd
                         }
                     }
                 }
@@ -202,8 +212,7 @@ fun TerminalApp() {
             .background(Color(0xFF0D1117))
             .padding(8.dp),
     ) {
-        // Output: weight no filho directo do Column (SelectionContainer).
-        // Antes o weight estava no Text interno → era ignorado e a barra sumia.
+        // weight no filho directo do Column — senão o output empurra a barra para fora
         SelectionContainer(
             modifier = Modifier
                 .weight(1f)
@@ -219,7 +228,7 @@ fun TerminalApp() {
                     .verticalScroll(scrollState),
             )
         }
-        // Barra de input FIXA em baixo (sem weight)
+        // Barra de input FIXA em baixo
         Spacer(modifier = Modifier.padding(vertical = 4.dp))
         Row(
             modifier = Modifier
