@@ -66,30 +66,9 @@ fun TerminalApp() {
 
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var session by remember { mutableStateOf<LinuxSession?>(null) }
-    var promptCwd by remember { mutableStateOf("/root") }
+    val lines = remember { mutableStateListOf<String>() }
 
-    val lines = remember {
-        mutableStateListOf(
-            "NoskOS Linux Terminal",
-            "Debian ARM64 via PRoot (sem root)",
-            "Multi-linha OK — cola script e toca Run",
-            "",
-        )
-    }
-
-    val fullText = remember(lines.size, lines.lastOrNull()) {
-        lines.joinToString("\n")
-    }
-
-    fun prompt(): String {
-        val short = when {
-            promptCwd == "/root" || promptCwd == "~" -> "~"
-            promptCwd.startsWith("/root/") -> "~" + promptCwd.removePrefix("/root")
-            else -> promptCwd
-        }
-        return "root@noskos-linux:$short#"
-    }
+    fun prompt(): String = if (isReady) "root@noskos:~# " else "noskos$ "
 
     fun scrollToBottom() {
         scope.launch {
@@ -99,16 +78,24 @@ fun TerminalApp() {
 
     fun copyAll() {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        cm.setPrimaryClip(ClipData.newPlainText("terminal", fullText))
+        cm.setPrimaryClip(ClipData.newPlainText("terminal", lines.joinToString("\n")))
         Toast.makeText(context, "Copiado", Toast.LENGTH_SHORT).show()
     }
 
     LaunchedEffect(Unit) {
         linuxManager.initialize()
-        if (linuxManager.isReady.value) {
-            session = linuxManager.startSession()
-            promptCwd = session?.cwd ?: "/root"
-        }
+        lines.clear()
+        lines.add("NoskOS Terminal")
+        lines.add("status: $statusMessage")
+        lines.add("rootfs: $rootFsStatus")
+        lines.add("ready: $isReady")
+        lines.add("")
+        lines.add("Comandos especiais:")
+        lines.add("  full-setup / setup-all / wizard — instalar tudo")
+        lines.add("  setup-runtime | setup-storage | setup-dns")
+        lines.add("  install | reinstall | status | diag")
+        lines.add("  help")
+        lines.add("")
     }
 
     LaunchedEffect(installProgress) {
@@ -119,189 +106,95 @@ fun TerminalApp() {
         }
     }
 
-    fun run(cmd: String) {
-        val trimmed = cmd.trim()
-        if (trimmed.isEmpty()) return
-
-        lines.add("${prompt()} $trimmed")
-        scrollToBottom()
-
-        val lower = trimmed.lowercase()
-
-        // Built-ins handled before shell
-        when (lower) {
-            "clear", "cls" -> {
-                lines.clear()
-                lines.add("NoskOS Linux Terminal")
-                return
-            }
-            "help", "?" -> {
-                lines.add("Comandos NoskOS:")
-                lines.add("  full-setup / setup-all / wizard — instalar tudo")
-                lines.add("  setup-runtime | setup-storage | setup-dns")
-                lines.add("  install | reinstall | status | diag")
-                lines.add("  clear — limpar ecrã")
-                lines.add("  qualquer comando Debian (ls, apt, python3...)")
-                lines.add("")
-                scrollToBottom()
-                return
-            }
-            "status" -> {
-                lines.add(statusMessage)
-                lines.add("rootFs: $rootFsStatus")
-                lines.add("ready: $isReady")
-                lines.add("busy: $busy")
-                lines.add("")
-                scrollToBottom()
-                return
-            }
-            "diag", "diagnostic" -> {
-                scope.launch {
-                    val rt = linuxManager.getRuntime()
-                    rt.diagnostic().lines().forEach { lines.add(it) }
-                    lines.add("")
-                    scrollToBottom()
-                }
-                return
-            }
-            "full-setup", "setup-all", "wizard" -> {
-                if (busy) {
-                    lines.add("ocupado...")
-                    scrollToBottom()
-                    return
-                }
-                busy = true
-                session = null
-                scope.launch {
-                    try {
+    fun run(cmdRaw: String) {
+        val cmd = cmdRaw.trim()
+        if (cmd.isEmpty() || busy) return
+        lines.add(prompt() + cmd)
+        busy = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                when (cmd.lowercase()) {
+                    "help" -> {
+                        lines.add("Comandos:")
+                        lines.add("  full-setup / setup-all / wizard")
+                        lines.add("  setup-runtime | setup-storage | setup-dns")
+                        lines.add("  install | reinstall | status | diag")
+                        lines.add("  clear")
+                        lines.add("  (qualquer outro = shell no Debian se ready)")
+                    }
+                    "clear" -> {
+                        lines.clear()
+                        lines.add("NoskOS Terminal")
+                    }
+                    "status" -> {
+                        linuxManager.initialize()
+                        lines.add("status: ${linuxManager.statusMessage.value}")
+                        lines.add("rootfs: ${linuxManager.rootFsStatus.value}")
+                        lines.add("ready: ${linuxManager.isReady.value}")
+                    }
+                    "diag" -> {
+                        val rt = linuxManager.getRuntime()
+                        lines.add("diag: proot=${rt.isProotInstalled()} rootfs=${rt.isRootFsReady()}")
+                    }
+                    "full-setup", "setup-all", "wizard" -> {
                         lines.add("A executar full-setup...")
-                        scrollToBottom()
                         val r = linuxManager.fullSetup()
                         if (r.isSuccess) {
                             lines.add("full-setup OK — Linux pronto")
-                            session = linuxManager.startSession()
-                            promptCwd = session?.cwd ?: "/root"
                         } else {
                             lines.add("full-setup FALHOU: ${r.exceptionOrNull()?.message}")
                         }
-                        lines.add("")
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lines.add("error: ${e.message}")
-                    } finally {
-                        busy = false
                     }
-                }
-                return
-            }
-            "setup-storage" -> {
-                if (busy) {
-                    lines.add("ocupado...")
-                    return
-                }
-                busy = true
-                scope.launch {
-                    try {
+                    "setup-storage" -> {
                         val r = linuxManager.setupStorage()
                         lines.add(if (r.isSuccess) "setup-storage OK" else "FALHOU: ${r.exceptionOrNull()?.message}")
-                        lines.add("")
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lines.add("error: ${e.message}")
-                    } finally {
-                        busy = false
                     }
-                }
-                return
-            }
-            "setup-runtime" -> {
-                if (busy) {
-                    lines.add("ocupado...")
-                    return
-                }
-                busy = true
-                scope.launch {
-                    try {
+                    "setup-runtime" -> {
                         val r = linuxManager.setupRuntime()
                         lines.add(if (r.isSuccess) "setup-runtime OK" else "FALHOU: ${r.exceptionOrNull()?.message}")
-                        lines.add("")
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lines.add("error: ${e.message}")
-                    } finally {
-                        busy = false
                     }
-                }
-                return
-            }
-            "setup-dns" -> {
-                if (busy) {
-                    lines.add("ocupado...")
-                    return
-                }
-                busy = true
-                scope.launch {
-                    try {
+                    "setup-dns" -> {
                         val r = linuxManager.setupDns()
                         lines.add(if (r.isSuccess) "setup-dns OK: ${r.getOrNull()}" else "FALHOU: ${r.exceptionOrNull()?.message}")
-                        lines.add("")
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lines.add("error: ${e.message}")
-                    } finally {
-                        busy = false
                     }
-                }
-                return
-            }
-            "install" -> {
-                if (busy) {
-                    lines.add("ocupado...")
-                    return
-                }
-                busy = true
-                scope.launch {
-                    try {
+                    "install" -> {
                         val r = linuxManager.installRootFs()
                         lines.add(if (r.isSuccess) "install OK" else "FALHOU: ${r.exceptionOrNull()?.message}")
-                        lines.add("")
-                        scrollToBottom()
-                    } catch (e: Exception) {
-                        lines.add("error: ${e.message}")
-                    } finally {
-                        busy = false
                     }
-                }
-                return
-            }
-        }
-
-        // Shell via session
-        if (busy) {
-            lines.add("ocupado...")
-            scrollToBottom()
-            return
-        }
-        val s = session ?: linuxManager.startSession().also { session = it }
-        busy = true
-        scope.launch {
-            try {
-                s.execute(trimmed) { line ->
-                    scope.launch(Dispatchers.Main) {
-                        lines.add(line)
-                        scrollToBottom()
+                    "reinstall" -> {
+                        val r = linuxManager.reinstallRootFs()
+                        lines.add(if (r.isSuccess) "reinstall OK" else "FALHOU: ${r.exceptionOrNull()?.message}")
+                    }
+                    else -> {
+                        if (!linuxManager.isReady.value) {
+                            lines.add("RootFS nao pronto. Corre: full-setup")
+                        } else {
+                            val session = LinuxSession(linuxManager.getRuntime())
+                            val r = session.exec(cmd)
+                            val out = r.getOrNull()
+                            if (out != null) {
+                                if (out.stdout.isNotBlank()) out.stdout.lines().forEach { lines.add(it) }
+                                if (out.stderr.isNotBlank()) out.stderr.lines().forEach { lines.add("[err] $it") }
+                                if (out.stdout.isBlank() && out.stderr.isBlank()) {
+                                    lines.add("(sem output, exit=${out.exitCode})")
+                                }
+                            } else {
+                                lines.add("ERRO: ${r.exceptionOrNull()?.message}")
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
-                lines.add("error: ${e.message}")
+                lines.add("EXCECAO: ${e.message}")
             } finally {
-                busy = false
-                promptCwd = s.cwd
                 lines.add("")
+                busy = false
                 scrollToBottom()
             }
         }
     }
+
+    val fullText = lines.joinToString("\n")
 
     Column(
         modifier = Modifier
@@ -309,20 +202,31 @@ fun TerminalApp() {
             .background(Color(0xFF0D1117))
             .padding(8.dp),
     ) {
-        SelectionContainer {
+        // Output: weight no filho directo do Column (SelectionContainer).
+        // Antes o weight estava no Text interno → era ignorado e a barra sumia.
+        SelectionContainer(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
             Text(
                 text = fullText,
                 color = Color(0xFF3FB950),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
                 modifier = Modifier
-                    .weight(1f)
                     .fillMaxWidth()
                     .verticalScroll(scrollState),
             )
         }
-        Spacer(modifier = Modifier.padding(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // Barra de input FIXA em baixo (sem weight)
+        Spacer(modifier = Modifier.padding(vertical = 4.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 52.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = if (busy) "[busy]" else prompt(),
                 color = if (busy) Color(0xFFD29922) else Color(0xFF3FB950),
