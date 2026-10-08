@@ -69,6 +69,12 @@ fun WindowFrame(
     val windowWidth = with(density) { window.size.width.toDp() }
     val windowHeight = with(density) { window.size.height.toDp() }
 
+    // Live size holder so drag gestures do not restart when size changes
+    val sizeHolder = remember(window.instanceId) { mutableStateOf(window.size) }
+    sizeHolder.value = window.size
+    val posHolder = remember(window.instanceId) { mutableStateOf(window.position) }
+    posHolder.value = window.position
+
     Box(
         modifier = Modifier
             .offset { IntOffset(window.position.x.toInt(), window.position.y.toInt()) }
@@ -92,16 +98,15 @@ fun WindowFrame(
                         change.consume()
                         onMove(
                             Offset(
-                                window.position.x + dragAmount.x,
-                                window.position.y + dragAmount.y,
+                                posHolder.value.x + dragAmount.x,
+                                posHolder.value.y + dragAmount.y,
                             ),
                         )
                     },
                 )
             },
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Title bar
+        Column(Modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -142,7 +147,6 @@ fun WindowFrame(
                     )
                 }
             }
-            // Content
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -150,7 +154,6 @@ fun WindowFrame(
             ) {
                 content()
             }
-            // Resize handle (bottom-right)
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -160,8 +163,8 @@ fun WindowFrame(
                             change.consume()
                             onResize(
                                 Size(
-                                    (window.size.width + dragAmount.x).coerceAtLeast(200f),
-                                    (window.size.height + dragAmount.y).coerceAtLeast(150f),
+                                    (sizeHolder.value.width + dragAmount.x).coerceAtLeast(200f),
+                                    (sizeHolder.value.height + dragAmount.y).coerceAtLeast(150f),
                                 ),
                             )
                         }
