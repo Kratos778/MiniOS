@@ -132,8 +132,8 @@ fun Desktop() {
                     }
                 }
 
+                // Nao filtrar minimizadas: estado das apps sobrevive ao minimizar
                 windowManager.windows
-                    .filter { !it.isMinimized }
                     .sortedBy { it.zIndex }
                     .forEach { window ->
                         key(window.instanceId) {
