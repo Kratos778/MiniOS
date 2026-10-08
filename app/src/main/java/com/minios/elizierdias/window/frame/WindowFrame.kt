@@ -6,15 +6,12 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -25,10 +22,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,8 +51,7 @@ fun WindowFrame(
     onToggleMaximize: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    // Minimizada: nao desenhar o frame, MAS manter o content na composition
-    // para o estado da app (Terminal/Linux/Browser) nao fazer reset.
+    // Minimizada: manter content na composition (sem reset de estado).
     if (window.isMinimized) {
         Box(modifier = Modifier.size(0.dp)) {
             content()
@@ -69,7 +63,6 @@ fun WindowFrame(
     val windowWidth = with(density) { window.size.width.toDp() }
     val windowHeight = with(density) { window.size.height.toDp() }
 
-    // Live size holder so drag gestures do not restart when size changes
     val sizeHolder = remember(window.instanceId) { mutableStateOf(window.size) }
     sizeHolder.value = window.size
     val posHolder = remember(window.instanceId) { mutableStateOf(window.position) }
@@ -90,29 +83,29 @@ fun WindowFrame(
                 shape = RoundedCornerShape(10.dp),
             )
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xFF161B22))
-            .pointerInput(window.instanceId) {
-                detectDragGestures(
-                    onDragStart = { onFocus() },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        onMove(
-                            Offset(
-                                posHolder.value.x + dragAmount.x,
-                                posHolder.value.y + dragAmount.y,
-                            ),
-                        )
-                    },
-                )
-            },
+            .background(Color(0xFF161B22)),
     ) {
-        Column(Modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(36.dp)
                     .background(Color(0xFF21262D))
-                    .padding(horizontal = 8.dp),
+                    .padding(horizontal = 8.dp)
+                    .pointerInput(window.instanceId) {
+                        detectDragGestures(
+                            onDragStart = { onFocus() },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                onMove(
+                                    Offset(
+                                        posHolder.value.x + dragAmount.x,
+                                        posHolder.value.y + dragAmount.y,
+                                    ),
+                                )
+                            },
+                        )
+                    },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -154,21 +147,39 @@ fun WindowFrame(
             ) {
                 content()
             }
+        }
+        // Resize handle — BoxScope.align (filho do Box exterior)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .size(36.dp)
+                .pointerInput(window.instanceId) {
+                    var w = sizeHolder.value.width
+                    var h = sizeHolder.value.height
+                    detectDragGestures(
+                        onDragStart = {
+                            onFocus()
+                            w = sizeHolder.value.width
+                            h = sizeHolder.value.height
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            w = (w + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
+                            h = (h + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
+                            onResize(Size(w, h))
+                        },
+                    )
+                },
+            contentAlignment = Alignment.BottomEnd,
+        ) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
+                    .padding(4.dp)
                     .size(16.dp)
-                    .pointerInput(window.instanceId) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            onResize(
-                                Size(
-                                    (sizeHolder.value.width + dragAmount.x).coerceAtLeast(200f),
-                                    (sizeHolder.value.height + dragAmount.y).coerceAtLeast(150f),
-                                ),
-                            )
-                        }
-                    },
+                    .background(
+                        color = if (window.isFocused) Color(0xFF58A6FF) else Color(0xFF6E7681),
+                        shape = RoundedCornerShape(3.dp),
+                    ),
             )
         }
     }
