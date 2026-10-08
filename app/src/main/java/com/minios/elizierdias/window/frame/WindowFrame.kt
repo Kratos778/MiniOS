@@ -56,20 +56,18 @@ fun WindowFrame(
     onToggleMaximize: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    // Minimized windows are not drawn (Desktop filters them). Safety guard:
-    if (window.isMinimized) return
+    // Minimizada: nao desenhar o frame, MAS manter o content na composition
+    // para o estado da app (Terminal/Linux/Browser) nao fazer reset.
+    if (window.isMinimized) {
+        Box(modifier = Modifier.size(0.dp)) {
+            content()
+        }
+        return
+    }
 
     val density = LocalDensity.current
     val windowWidth = with(density) { window.size.width.toDp() }
     val windowHeight = with(density) { window.size.height.toDp() }
-
-    // Live size holder so drag gestures do not restart when size changes
-    val sizeHolder = remember(window.instanceId) { mutableStateOf(window.size) }
-    sizeHolder.value = window.size
-    val posHolder = remember(window.instanceId) { mutableStateOf(window.position) }
-    posHolder.value = window.position
-
-    var dragPos by remember(window.instanceId) { mutableStateOf(window.position) }
 
     Box(
         modifier = Modifier
@@ -88,14 +86,18 @@ fun WindowFrame(
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF161B22))
             .pointerInput(window.instanceId) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        if (event.changes.any { it.pressed }) {
-                            onFocus()
-                        }
-                    }
-                }
+                detectDragGestures(
+                    onDragStart = { onFocus() },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onMove(
+                            Offset(
+                                window.position.x + dragAmount.x,
+                                window.position.y + dragAmount.y,
+                            ),
+                        )
+                    },
+                )
             },
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -104,32 +106,15 @@ fun WindowFrame(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(36.dp)
-                    .background(
-                        if (window.isFocused) Color(0xFF21262D) else Color(0xFF1C2128),
-                    )
-                    .pointerInput(window.instanceId, window.isMaximized) {
-                        detectDragGestures(
-                            onDragStart = {
-                                onFocus()
-                                dragPos = posHolder.value
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                if (window.isMaximized) return@detectDragGestures
-                                dragPos += dragAmount
-                                onMove(dragPos)
-                            },
-                        )
-                    },
+                    .background(Color(0xFF21262D))
+                    .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Spacer(Modifier.width(10.dp))
                 Text(
                     text = window.app.title,
                     color = Color(0xFFE6EDF3),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    maxLines = 1,
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = onMinimize, modifier = Modifier.size(28.dp)) {
@@ -137,15 +122,15 @@ fun WindowFrame(
                         Icons.Filled.Minimize,
                         contentDescription = "Minimize",
                         tint = Color(0xFF8B949E),
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(16.dp),
                     )
                 }
                 IconButton(onClick = onToggleMaximize, modifier = Modifier.size(28.dp)) {
                     Icon(
                         Icons.Filled.CropSquare,
-                        contentDescription = if (window.isMaximized) "Restore" else "Maximize",
-                        tint = if (window.isMaximized) Color(0xFF58A6FF) else Color(0xFF8B949E),
-                        modifier = Modifier.size(14.dp),
+                        contentDescription = "Maximize",
+                        tint = Color(0xFF8B949E),
+                        modifier = Modifier.size(16.dp),
                     )
                 }
                 IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
@@ -153,103 +138,35 @@ fun WindowFrame(
                         Icons.Filled.Close,
                         contentDescription = "Close",
                         tint = Color(0xFFF85149),
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(16.dp),
                     )
                 }
             }
-
             // Content
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .fillMaxWidth(),
             ) {
                 content()
             }
-        }
-
-        // Resize handles (only when not maximized)
-        if (!window.isMaximized) {
-            // Right edge
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxHeight()
-                    .width(10.dp)
-                    .pointerInput(window.instanceId) {
-                        var w = sizeHolder.value.width
-                        var h = sizeHolder.value.height
-                        detectDragGestures(
-                            onDragStart = {
-                                onFocus()
-                                w = sizeHolder.value.width
-                                h = sizeHolder.value.height
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                w = (w + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
-                                onResize(Size(w, h))
-                            },
-                        )
-                    },
-            )
-            // Bottom edge
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(10.dp)
-                    .pointerInput(window.instanceId) {
-                        var w = sizeHolder.value.width
-                        var h = sizeHolder.value.height
-                        detectDragGestures(
-                            onDragStart = {
-                                onFocus()
-                                w = sizeHolder.value.width
-                                h = sizeHolder.value.height
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                h = (h + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
-                                onResize(Size(w, h))
-                            },
-                        )
-                    },
-            )
-            // Blue corner block — larger hit area, smooth drag
+            // Resize handle (bottom-right)
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .size(36.dp)
+                    .size(16.dp)
                     .pointerInput(window.instanceId) {
-                        var w = sizeHolder.value.width
-                        var h = sizeHolder.value.height
-                        detectDragGestures(
-                            onDragStart = {
-                                onFocus()
-                                w = sizeHolder.value.width
-                                h = sizeHolder.value.height
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                w = (w + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
-                                h = (h + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
-                                onResize(Size(w, h))
-                            },
-                        )
+                        detectDragGestures { change, dragAmount ->
+                            change.consume()
+                            onResize(
+                                Size(
+                                    (window.size.width + dragAmount.x).coerceAtLeast(200f),
+                                    (window.size.height + dragAmount.y).coerceAtLeast(150f),
+                                ),
+                            )
+                        }
                     },
-                contentAlignment = Alignment.BottomEnd,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .padding(4.dp)
-                        .size(16.dp)
-                        .background(
-                            color = if (window.isFocused) Color(0xFF58A6FF) else Color(0xFF6E7681),
-                            shape = RoundedCornerShape(3.dp),
-                        ),
-                )
-            }
+            )
         }
     }
 }
