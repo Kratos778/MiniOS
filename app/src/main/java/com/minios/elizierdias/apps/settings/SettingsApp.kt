@@ -61,6 +61,8 @@ import com.minios.elizierdias.core.purgeWallpaperFiles
 import com.minios.elizierdias.core.wallpaperStorageDir
 import com.minios.elizierdias.personalization.Wallpapers
 import com.minios.elizierdias.ui.components.PcScrollVerticalScrollbar
+import com.minios.elizierdias.windows.WindowsConfig
+import com.minios.elizierdias.windows.WindowsManager
 import java.io.File
 import java.io.FileOutputStream
 import kotlin.coroutines.resume
@@ -81,6 +83,14 @@ fun SettingsApp() {
     val scope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
 
+    val windowsManager = remember(context) {
+        WindowsManager(context).also { it.initialize() }
+    }
+    val windowsInstalled by windowsManager.isInstalled.collectAsState()
+    val windowsStatus by windowsManager.statusMessage.collectAsState()
+    val windowsProgress by windowsManager.installProgress.collectAsState()
+    var windowsBusy by remember { mutableStateOf(false) }
+
     val wallpaper by config.wallpaperId.collectAsState(initial = "default_gradient")
     val wallpaperUri by config.wallpaperUri.collectAsState(initial = "")
     val wallpaperVideoSound by config.wallpaperVideoSound.collectAsState(initial = false)
@@ -93,11 +103,9 @@ fun SettingsApp() {
     fun saveAndApply(uri: Uri, preferImage: Boolean = false) {
         scope.launch {
             statusMsg = "A guardar wallpaper..."
-            // 1) Tira o player do ecrã (liberta current.mp4/gif)
             config.detachWallpaperForReplace()
             delay(120)
 
-            // 2) Grava o novo ficheiro (purge + current.*)
             val result = withContext(Dispatchers.IO) {
                 try {
                     saveWallpaper(context, uri, preferImage)
@@ -109,7 +117,6 @@ fun SettingsApp() {
             }
             val savedPath = result.first
             if (savedPath != null) {
-                // 3) Aplica path + incrementa versão (Compose recria player)
                 config.setWallpaperUri(savedPath)
                 val kind = when {
                     isVideoPath(savedPath) -> "vídeo"
@@ -172,6 +179,7 @@ fun SettingsApp() {
                 .verticalScroll(scrollState)
                 .padding(16.dp),
         ) {
+            // ── Wallpaper ──────────────────────────────────────────
             Text("Wallpaper", color = Color(0xFFC9D1D9), fontSize = 14.sp)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -276,6 +284,8 @@ fun SettingsApp() {
                 Spacer(Modifier.height(4.dp))
                 Text(statusMsg, color = Color(0xFF8B949E), fontSize = 11.sp)
             }
+
+            // ── Desempenho ────────────────────────────────────────
             Spacer(Modifier.height(24.dp))
             Text("Desempenho", color = Color(0xFFC9D1D9), fontSize = 14.sp)
             Spacer(Modifier.height(8.dp))
@@ -302,9 +312,75 @@ fun SettingsApp() {
                     )
                 }
             }
+
+            // ── Windows Compatibility ─────────────────────────────
+            Spacer(Modifier.height(24.dp))
+            Text("Windows Compatibility", color = Color(0xFFC9D1D9), fontSize = 14.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Camada opcional para executar programas Windows (EXE, MSI, CMD) " +
+                    "através de Wine + Box64. Não vem no APK base.",
+                color = Color(0xFF8B949E),
+                fontSize = 11.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+
+            val statusColor = if (windowsInstalled) Color(0xFF3FB950) else Color(0xFFD29922)
+            Text(
+                if (windowsInstalled) "Estado: Instalada" else "Estado: Não instalada",
+                color = statusColor,
+                fontSize = 13.sp,
+            )
+            Text(windowsStatus, color = Color(0xFF8B949E), fontSize = 11.sp)
+
+            windowsProgress?.let { prog ->
+                Spacer(Modifier.height(4.dp))
+                Text(prog, color = Color(0xFF58A6FF), fontSize = 11.sp)
+            }
+
+            Spacer(Modifier.height(10.dp))
+            if (!windowsInstalled) {
+                Button(
+                    onClick = {
+                        if (windowsBusy) return@Button
+                        windowsBusy = true
+                        scope.launch {
+                            windowsManager.installRuntime { msg ->
+                                // progress already observed via StateFlow
+                            }
+                            windowsBusy = false
+                        }
+                    },
+                    enabled = !windowsBusy,
+                ) {
+                    Text(if (windowsBusy) "A instalar..." else "Instalar camada Windows")
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Nota: nesta versão a instalação é um placeholder. " +
+                        "A descarga real de Wine/Box64 será ligada na Fase 2.",
+                    color = Color(0xFF8B949E),
+                    fontSize = 11.sp,
+                )
+            } else {
+                Text(
+                    "Prefixo default: ${WindowsConfig.defaultPrefixDir(context).absolutePath}",
+                    color = Color(0xFF8B949E),
+                    fontSize = 11.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Para executar um programa: abre o Files, navega até ao .exe " +
+                        "e toca nele. Será pedida confirmação.",
+                    color = Color(0xFF8B949E),
+                    fontSize = 11.sp,
+                )
+            }
+
+            // ── Sobre ─────────────────────────────────────────────
             Spacer(Modifier.height(24.dp))
             Text("Sobre", color = Color(0xFFC9D1D9), fontSize = 14.sp)
-            Text("MiniOS · live wallpaper fix", color = Color(0xFF8B949E), fontSize = 12.sp)
+            Text("NoskOS · Windows layer foundation", color = Color(0xFF8B949E), fontSize = 12.sp)
             Spacer(Modifier.height(40.dp))
         }
         PcScrollVerticalScrollbar(
@@ -503,35 +579,22 @@ private fun sniffExtension(
     nameHint: String,
     preferImage: Boolean,
 ): String {
-    try {
-        file.inputStream().use { ins ->
-            val head = ByteArray(16)
-            val n = ins.read(head)
-            if (n >= 3) {
-                if (head[0] == 'G'.code.toByte() && head[1] == 'I'.code.toByte() && head[2] == 'F'.code.toByte()) {
-                    return ".gif"
-                }
-                if (head[0] == 0xFF.toByte() && head[1] == 0xD8.toByte()) return ".jpg"
-                if (head[0] == 0x89.toByte() && head[1] == 'P'.code.toByte()) return ".png"
-                if (n >= 12 && head[0] == 'R'.code.toByte() && head[8] == 'W'.code.toByte()) return ".webp"
-                if (n >= 8 && head[4] == 'f'.code.toByte() && head[5] == 't'.code.toByte()) return ".mp4"
-                if (head[0] == 0x1A.toByte() && head[1] == 0x45.toByte()) return ".webm"
-            }
+    if (preferImage && (mime?.startsWith("image/") == true || nameHint.contains(".gif"))) {
+        return when {
+            nameHint.endsWith(".gif") || mime == "image/gif" -> ".gif"
+            nameHint.endsWith(".png") || mime == "image/png" -> ".png"
+            nameHint.endsWith(".webp") || mime == "image/webp" -> ".webp"
+            else -> ".jpg"
         }
-    } catch (_: Exception) {
     }
-    when {
-        mime == "image/jpeg" || mime == "image/jpg" -> return ".jpg"
-        mime == "image/png" -> return ".png"
-        mime == "image/webp" -> return ".webp"
-        mime == "image/gif" -> return ".gif"
-        mime == "video/mp4" -> return ".mp4"
-        mime == "video/webm" -> return ".webm"
-        mime?.startsWith("video/") == true -> return ".mp4"
-        mime?.startsWith("image/") == true -> return ".jpg"
+    return when {
+        nameHint.endsWith(".gif") || mime == "image/gif" -> ".gif"
+        nameHint.endsWith(".png") || mime == "image/png" -> ".png"
+        nameHint.endsWith(".webp") || mime == "image/webp" -> ".webp"
+        nameHint.endsWith(".jpg") || nameHint.endsWith(".jpeg") || mime == "image/jpeg" -> ".jpg"
+        nameHint.endsWith(".webm") || mime == "video/webm" -> ".webm"
+        nameHint.endsWith(".mkv") -> ".mkv"
+        nameHint.endsWith(".mp4") || mime?.startsWith("video/") == true -> ".mp4"
+        else -> ".bin"
     }
-    listOf(".gif", ".mp4", ".webm", ".mkv", ".mov", ".png", ".jpg", ".jpeg", ".webp").forEach { ext ->
-        if (nameHint.contains(ext)) return ext
-    }
-    return if (preferImage) ".jpg" else ".mp4"
 }

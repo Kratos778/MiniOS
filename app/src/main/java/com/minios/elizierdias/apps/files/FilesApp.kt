@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,16 +35,19 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,7 +63,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import coil.compose.AsyncImage
 import com.minios.elizierdias.ui.components.PcLazyVerticalScrollbar
+import com.minios.elizierdias.windows.LaunchResult
+import com.minios.elizierdias.windows.WindowsManager
 import java.io.File
+import kotlinx.coroutines.launch
 
 private data class FileEntry(
     val name: String,
@@ -84,6 +89,9 @@ private fun mimeOf(file: File): String {
         "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         "apk" -> "application/vnd.android.package-archive"
+        "exe" -> "application/x-msdownload"
+        "msi" -> "application/x-msi"
+        "bat", "cmd" -> "application/x-bat"
         else -> "application/octet-stream"
     }
 }
@@ -98,10 +106,24 @@ private fun isText(ext: String) =
         "csv", "ini", "conf", "cfg", "properties", "gradle", "toml",
     )
 
+private fun isWindowsExecutable(ext: String) =
+    ext in setOf("exe", "msi", "bat", "cmd", "scr")
+
+private fun formatSize(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    if (bytes < 1024 * 1024) return "${bytes / 1024} KB"
+    return "${"%.1f".format(bytes / (1024.0 * 1024.0))} MB"
+}
+
 @Composable
 fun FilesApp() {
     val context = LocalContext.current
     val activity = context as? ComponentActivity
+    val scope = rememberCoroutineScope()
+
+    val windowsManager = remember(context) {
+        WindowsManager(context).also { it.initialize() }
+    }
 
     var currentDir by remember { mutableStateOf<File?>(null) }
     var entries by remember { mutableStateOf<List<FileEntry>>(emptyList()) }
@@ -109,6 +131,10 @@ fun FilesApp() {
     var hasPermission by remember { mutableStateOf(false) }
     var previewFile by remember { mutableStateOf<File?>(null) }
     var previewText by remember { mutableStateOf<String?>(null) }
+
+    // Diálogo de confirmação para executáveis Windows
+    var pendingExe by remember { mutableStateOf<File?>(null) }
+    var launchStatus by remember { mutableStateOf<String?>(null) }
 
     fun checkPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -219,9 +245,58 @@ fun FilesApp() {
         }
     }
 
+    fun handleWindowsExecutable(file: File) {
+        when (val result = windowsManager.prepareLaunch(file)) {
+            is LaunchResult.ConfirmationRequired -> {
+                pendingExe = file
+            }
+            is LaunchResult.NeedsInstall -> {
+                launchStatus = result.message
+                Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+            }
+            is LaunchResult.Failure -> {
+                Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+            }
+            is LaunchResult.Success -> {
+                // já lançado (não deve acontecer em prepareLaunch)
+            }
+        }
+    }
+
+    fun confirmAndLaunch(file: File) {
+        pendingExe = null
+        scope.launch {
+            launchStatus = "A iniciar ${file.name}..."
+            when (val result = windowsManager.launchConfirmed(file)) {
+                is LaunchResult.Success -> {
+                    launchStatus = "Iniciado: ${file.name}"
+                    Toast.makeText(
+                        context,
+                        "Windows: ${file.name} (placeholder até Fase 2)",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                is LaunchResult.NeedsInstall -> {
+                    launchStatus = result.message
+                    Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                }
+                is LaunchResult.Failure -> {
+                    launchStatus = result.message
+                    Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                }
+                is LaunchResult.ConfirmationRequired -> {
+                    // não deve acontecer aqui
+                }
+            }
+        }
+    }
+
     fun openFile(file: File) {
         val ext = file.extension.lowercase()
         when {
+            isWindowsExecutable(ext) -> {
+                handleWindowsExecutable(file)
+            }
             isImage(ext) -> {
                 previewFile = file
                 previewText = null
@@ -259,6 +334,39 @@ fun FilesApp() {
     LaunchedEffect(hasPermission) { if (hasPermission) loadDir(currentDir) }
 
     val listState = rememberLazyListState()
+
+    // Diálogo de confirmação EXE
+    pendingExe?.let { exe ->
+        AlertDialog(
+            onDismissRequest = { pendingExe = null },
+            title = { Text("Executar programa Windows?") },
+            text = {
+                Column {
+                    Text("Ficheiro: ${exe.name}")
+                    Spacer(Modifier.height(4.dp))
+                    Text("Caminho: ${exe.absolutePath}", fontSize = 12.sp, color = Color.Gray)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Tamanho: ${formatSize(exe.length())}")
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Programas Windows podem alterar ficheiros no prefixo Wine. " +
+                            "Só continue se confiar na origem do ficheiro.",
+                        fontSize = 12.sp,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmAndLaunch(exe) }) {
+                    Text("Executar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingExe = null }) {
+                    Text("Cancelar")
+                }
+            },
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0D1117))) {
         Row(
@@ -310,6 +418,15 @@ fun FilesApp() {
                     )
                 }
             }
+        }
+
+        launchStatus?.let { msg ->
+            Text(
+                msg,
+                color = Color(0xFF58A6FF),
+                fontSize = 11.sp,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+            )
         }
 
         if (!hasPermission) {
@@ -376,6 +493,8 @@ fun FilesApp() {
             Row(modifier = Modifier.fillMaxSize()) {
                 LazyColumn(state = listState, modifier = Modifier.weight(1f)) {
                     items(entries) { e ->
+                        val isExe = e.file != null && !e.isDir &&
+                            isWindowsExecutable(e.file.extension.lowercase())
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -398,11 +517,19 @@ fun FilesApp() {
                                     else -> Icons.Filled.InsertDriveFile
                                 },
                                 contentDescription = null,
-                                tint = if (e.isDir) Color(0xFF58A6FF) else Color(0xFF8B949E),
+                                tint = when {
+                                    e.isDir -> Color(0xFF58A6FF)
+                                    isExe -> Color(0xFFD2A8FF)
+                                    else -> Color(0xFF8B949E)
+                                },
                                 modifier = Modifier.size(18.dp),
                             )
                             Spacer(Modifier.width(10.dp))
-                            Text(e.name, color = Color(0xFFC9D1D9), fontSize = 14.sp)
+                            Text(
+                                e.name,
+                                color = if (isExe) Color(0xFFD2A8FF) else Color(0xFFC9D1D9),
+                                fontSize = 14.sp,
+                            )
                         }
                     }
                 }
