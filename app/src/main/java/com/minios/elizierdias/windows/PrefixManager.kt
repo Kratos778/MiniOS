@@ -7,21 +7,15 @@
 
 package com.minios.elizierdias.windows
 
-import android.content.Context
 import java.io.File
 
 /**
- * Gere prefixos Wine.
- *
- * Um prefixo é uma pasta que simula um ambiente Windows (drive_c, registo, etc.).
- * O prefixo "default" é usado por defeito.
+ * Gere prefixos Wine em /sdcard/MiniOS/wine/prefixes.
  */
-class PrefixManager(
-    private val context: Context,
-) {
+class PrefixManager {
 
     fun listPrefixes(): List<String> {
-        val dir = WindowsConfig.prefixesDir(context)
+        val dir = WindowsConfig.prefixesDir()
         if (!dir.exists()) return listOf(WindowsConfig.DEFAULT_PREFIX_NAME)
         return dir.listFiles()
             ?.filter { it.isDirectory }
@@ -31,11 +25,9 @@ class PrefixManager(
     }
 
     fun ensureDefaultPrefix(): File {
-        WindowsConfig.ensureDirs(context)
-        val prefix = WindowsConfig.defaultPrefixDir(context)
+        val prefix = WindowsConfig.defaultPrefixDir()
         if (!prefix.exists()) {
             prefix.mkdirs()
-            // Estrutura mínima esperada pelo Wine (criada na primeira execução real do wineboot)
             File(prefix, "drive_c").mkdirs()
             File(prefix, "dosdevices").mkdirs()
         }
@@ -43,7 +35,7 @@ class PrefixManager(
     }
 
     fun getPrefix(name: String = WindowsConfig.DEFAULT_PREFIX_NAME): File {
-        val prefix = WindowsConfig.prefixDir(context, name)
+        val prefix = WindowsConfig.prefixDir(name)
         if (!prefix.exists()) {
             prefix.mkdirs()
             File(prefix, "drive_c").mkdirs()
@@ -56,7 +48,7 @@ class PrefixManager(
         if (name.isBlank() || name.contains("..") || name.contains("/")) {
             return Result.failure(IllegalArgumentException("Nome de prefixo inválido"))
         }
-        val prefix = WindowsConfig.prefixDir(context, name)
+        val prefix = WindowsConfig.prefixDir(name)
         if (prefix.exists()) {
             return Result.failure(IllegalStateException("Prefixo já existe: $name"))
         }
@@ -74,7 +66,7 @@ class PrefixManager(
         if (name == WindowsConfig.DEFAULT_PREFIX_NAME) {
             return Result.failure(IllegalArgumentException("Não é permitido apagar o prefixo default"))
         }
-        val prefix = WindowsConfig.prefixDir(context, name)
+        val prefix = WindowsConfig.prefixDir(name)
         if (!prefix.exists()) {
             return Result.failure(IllegalStateException("Prefixo não encontrado: $name"))
         }
@@ -87,5 +79,5 @@ class PrefixManager(
     }
 
     fun prefixExists(name: String): Boolean =
-        WindowsConfig.prefixDir(context, name).isDirectory
+        WindowsConfig.prefixDir(name).isDirectory
 }
