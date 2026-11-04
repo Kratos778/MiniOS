@@ -51,7 +51,6 @@ fun WindowFrame(
     onToggleMaximize: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    // Minimizada: manter content na composition (sem reset de estado).
     if (window.isMinimized) {
         Box(modifier = Modifier.size(0.dp)) {
             content()
@@ -74,24 +73,25 @@ fun WindowFrame(
             .size(width = windowWidth, height = windowHeight)
             .zIndex(window.zIndex.toFloat())
             .border(
-                width = if (window.isFocused) 2.dp else 1.dp,
+                width = if (window.isFocused) 1.5.dp else 1.dp,
                 color = if (window.isFocused) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     Color(0xFF30363D)
                 },
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
             )
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(Color(0xFF161B22)),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // Barra de título compacta (28dp)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(36.dp)
+                    .height(28.dp)
                     .background(Color(0xFF21262D))
-                    .padding(horizontal = 8.dp)
+                    .padding(horizontal = 6.dp)
                     .pointerInput(window.instanceId) {
                         detectDragGestures(
                             onDragStart = { onFocus() },
@@ -111,32 +111,33 @@ fun WindowFrame(
                 Text(
                     text = window.app.title,
                     color = Color(0xFFE6EDF3),
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f),
+                    maxLines = 1,
                 )
-                IconButton(onClick = onMinimize, modifier = Modifier.size(28.dp)) {
+                IconButton(onClick = onMinimize, modifier = Modifier.size(24.dp)) {
                     Icon(
                         Icons.Filled.Minimize,
                         contentDescription = "Minimize",
                         tint = Color(0xFF8B949E),
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(14.dp),
                     )
                 }
-                IconButton(onClick = onToggleMaximize, modifier = Modifier.size(28.dp)) {
+                IconButton(onClick = onToggleMaximize, modifier = Modifier.size(24.dp)) {
                     Icon(
                         Icons.Filled.CropSquare,
                         contentDescription = "Maximize",
                         tint = Color(0xFF8B949E),
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(14.dp),
                     )
                 }
-                IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
+                IconButton(onClick = onClose, modifier = Modifier.size(24.dp)) {
                     Icon(
                         Icons.Filled.Close,
                         contentDescription = "Close",
                         tint = Color(0xFFF85149),
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(14.dp),
                     )
                 }
             }
@@ -148,11 +149,10 @@ fun WindowFrame(
                 content()
             }
         }
-        // Resize handle — BoxScope.align (filho do Box exterior)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .size(36.dp)
+                .size(28.dp)
                 .pointerInput(window.instanceId) {
                     var w = sizeHolder.value.width
                     var h = sizeHolder.value.height
@@ -174,11 +174,11 @@ fun WindowFrame(
         ) {
             Box(
                 modifier = Modifier
-                    .padding(4.dp)
-                    .size(16.dp)
+                    .padding(3.dp)
+                    .size(12.dp)
                     .background(
                         color = if (window.isFocused) Color(0xFF58A6FF) else Color(0xFF6E7681),
-                        shape = RoundedCornerShape(3.dp),
+                        shape = RoundedCornerShape(2.dp),
                     ),
             )
         }

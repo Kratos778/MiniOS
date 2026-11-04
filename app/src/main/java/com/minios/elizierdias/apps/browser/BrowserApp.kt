@@ -77,24 +77,24 @@ private val TextMuted = Color(0xFF9AA0A6)
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun BrowserApp() {
+fun BrowserApp(startUrl: String? = null) {
     val context = LocalContext.current
+    val initial = startUrl?.takeIf { it.isNotBlank() } ?: "https://www.google.com"
 
     val tabs = remember {
         mutableStateListOf(
-            BrowserTab(0, "https://www.google.com", "Nova aba"),
+            BrowserTab(0, initial, if (startUrl != null) "Ficheiro" else "Nova aba"),
         )
     }
 
     var selectedTabId by remember { mutableIntStateOf(0) }
-    var addressText by remember { mutableStateOf("https://www.google.com") }
+    var addressText by remember { mutableStateOf(initial) }
     var webView by remember { mutableStateOf<WebView?>(null) }
 
     val selectedIndex = tabs.indexOfFirst { it.id == selectedTabId }.coerceAtLeast(0)
     val selectedTab = tabs.getOrNull(selectedIndex) ?: tabs.first()
 
     fun applyDesktopViewport(view: WebView) {
-        // Pedir layout desktop e zoom razoável (evita sites “gigantes”)
         view.evaluateJavascript(
             """
             (function() {
@@ -118,11 +118,11 @@ fun BrowserApp() {
             .fillMaxSize()
             .background(ChromeBg),
     ) {
-        // —— Abas (estilo Chrome)
+        // Abas mais baixas
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(36.dp)
+                .height(30.dp)
                 .background(ChromeBg),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -134,22 +134,22 @@ fun BrowserApp() {
                     val active = tab.id == selectedTabId
                     Row(
                         modifier = Modifier
-                            .height(32.dp)
-                            .width(160.dp)
-                            .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                            .height(28.dp)
+                            .width(140.dp)
+                            .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
                             .background(if (active) TabActive else TabInactive)
                             .clickable {
                                 selectedTabId = tab.id
                                 addressText = tab.url
                             }
-                            .padding(start = 10.dp),
+                            .padding(start = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             text = tab.title.ifBlank { "Nova aba" },
                             modifier = Modifier.weight(1f),
                             color = if (active) TextPrimary else TextMuted,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -170,13 +170,13 @@ fun BrowserApp() {
                                     }
                                 }
                             },
-                            modifier = Modifier.size(28.dp),
+                            modifier = Modifier.size(24.dp),
                         ) {
                             Icon(
                                 Icons.Filled.Close,
                                 "Fechar",
                                 tint = TextMuted,
-                                modifier = Modifier.size(14.dp),
+                                modifier = Modifier.size(12.dp),
                             )
                         }
                     }
@@ -190,49 +190,49 @@ fun BrowserApp() {
                     selectedTabId = newId
                     addressText = "https://www.google.com"
                 },
-                modifier = Modifier.size(36.dp),
+                modifier = Modifier.size(30.dp),
             ) {
-                Icon(Icons.Filled.Add, "Nova aba", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Add, "Nova aba", tint = TextPrimary, modifier = Modifier.size(16.dp))
             }
         }
 
-        // —— Barra de endereço compacta
+        // Barra de endereço mais baixa
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(40.dp)
+                .height(34.dp)
                 .background(TabActive)
-                .padding(horizontal = 4.dp),
+                .padding(horizontal = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(
                 onClick = { webView?.takeIf { it.canGoBack() }?.goBack() },
-                modifier = Modifier.size(34.dp),
+                modifier = Modifier.size(30.dp),
             ) {
-                Icon(Icons.Filled.ArrowBack, "Voltar", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.ArrowBack, "Voltar", tint = TextPrimary, modifier = Modifier.size(16.dp))
             }
             IconButton(
                 onClick = { webView?.takeIf { it.canGoForward() }?.goForward() },
-                modifier = Modifier.size(34.dp),
+                modifier = Modifier.size(30.dp),
             ) {
-                Icon(Icons.Filled.ArrowForward, "Avançar", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.ArrowForward, "Avançar", tint = TextPrimary, modifier = Modifier.size(16.dp))
             }
             IconButton(
                 onClick = { webView?.reload() },
-                modifier = Modifier.size(34.dp),
+                modifier = Modifier.size(30.dp),
             ) {
-                Icon(Icons.Filled.Refresh, "Recarregar", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Refresh, "Recarregar", tint = TextPrimary, modifier = Modifier.size(16.dp))
             }
 
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(2.dp))
 
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(30.dp)
-                    .clip(RoundedCornerShape(15.dp))
+                    .height(26.dp)
+                    .clip(RoundedCornerShape(13.dp))
                     .background(AddressBg)
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.CenterStart,
             ) {
                 androidx.compose.foundation.text.BasicTextField(
@@ -240,10 +240,10 @@ fun BrowserApp() {
                     onValueChange = { addressText = it },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = TextStyle(color = TextPrimary, fontSize = 13.sp),
+                    textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp),
                     decorationBox = { inner ->
                         if (addressText.isEmpty()) {
-                            Text("Pesquisar ou escrever um URL", color = TextMuted, fontSize = 13.sp)
+                            Text("Pesquisar ou escrever um URL", color = TextMuted, fontSize = 12.sp)
                         }
                         inner()
                     },
@@ -258,9 +258,9 @@ fun BrowserApp() {
                         tabs[selectedIndex] = tabs[selectedIndex].copy(url = target)
                     }
                 },
-                modifier = Modifier.size(34.dp),
+                modifier = Modifier.size(30.dp),
             ) {
-                Icon(Icons.Filled.Search, "Ir", tint = TextPrimary, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Search, "Ir", tint = TextPrimary, modifier = Modifier.size(16.dp))
             }
         }
 
@@ -291,18 +291,17 @@ fun BrowserApp() {
                             builtInZoomControls = true
                             displayZoomControls = false
 
-                            // Escala tipo PC — não “gigante”
                             textZoom = 85
                             defaultFontSize = 14
                             minimumFontSize = 10
 
-                            // User-Agent desktop Chrome (sites servem layout PC)
                             userAgentString =
                                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                                     "AppleWebKit/537.36 (KHTML, like Gecko) " +
                                     "Chrome/122.0.0.0 Safari/537.36"
 
-                            allowFileAccess = false
+                            // Preciso para file:// local
+                            allowFileAccess = true
                             allowContentAccess = true
                             mediaPlaybackRequiresUserGesture = false
                             loadsImagesAutomatically = true
@@ -372,7 +371,9 @@ fun BrowserApp() {
 private fun normalizeUrl(input: String): String {
     val value = input.trim()
     if (value.isEmpty()) return "https://www.google.com"
-    if (value.startsWith("http://") || value.startsWith("https://")) return value
+    if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("file://")) {
+        return value
+    }
     if (value.contains(".") && !value.contains(" ")) return "https://$value"
     return "https://www.google.com/search?q=${URLEncoder.encode(value, "UTF-8")}"
 }
