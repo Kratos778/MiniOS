@@ -51,13 +51,6 @@ fun WindowFrame(
     onToggleMaximize: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    if (window.isMinimized) {
-        Box(modifier = Modifier.size(0.dp)) {
-            content()
-        }
-        return
-    }
-
     val density = LocalDensity.current
     val windowWidth = with(density) { window.size.width.toDp() }
     val windowHeight = with(density) { window.size.height.toDp() }
@@ -67,14 +60,24 @@ fun WindowFrame(
     val posHolder = remember(window.instanceId) { mutableStateOf(window.position) }
     posHolder.value = window.position
 
+    /*
+     * IMPORTANTE: minimizar NÃO pode usar size(0.dp).
+     * AndroidView / WebView / MediaPlayer / Terminal perdem estado ou param
+     * quando o layout fica 0x0. Mantemos o tamanho real e empurramos a
+     * janela para fora do ecrã (ainda na composition).
+     */
+    val drawX = if (window.isMinimized) -100_000 else window.position.x.toInt()
+    val drawY = if (window.isMinimized) -100_000 else window.position.y.toInt()
+    val drawZ = if (window.isMinimized) -1f else window.zIndex.toFloat()
+
     Box(
         modifier = Modifier
-            .offset { IntOffset(window.position.x.toInt(), window.position.y.toInt()) }
+            .offset { IntOffset(drawX, drawY) }
             .size(width = windowWidth, height = windowHeight)
-            .zIndex(window.zIndex.toFloat())
+            .zIndex(drawZ)
             .border(
-                width = if (window.isFocused) 1.5.dp else 1.dp,
-                color = if (window.isFocused) {
+                width = if (window.isFocused && !window.isMinimized) 1.5.dp else 1.dp,
+                color = if (window.isFocused && !window.isMinimized) {
                     MaterialTheme.colorScheme.primary
                 } else {
                     Color(0xFF30363D)
@@ -85,14 +88,14 @@ fun WindowFrame(
             .background(Color(0xFF161B22)),
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Barra de título compacta (28dp)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(28.dp)
                     .background(Color(0xFF21262D))
                     .padding(horizontal = 6.dp)
-                    .pointerInput(window.instanceId) {
+                    .pointerInput(window.instanceId, window.isMinimized) {
+                        if (window.isMinimized) return@pointerInput
                         detectDragGestures(
                             onDragStart = { onFocus() },
                             onDrag = { change, dragAmount ->
@@ -149,38 +152,40 @@ fun WindowFrame(
                 content()
             }
         }
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .size(28.dp)
-                .pointerInput(window.instanceId) {
-                    var w = sizeHolder.value.width
-                    var h = sizeHolder.value.height
-                    detectDragGestures(
-                        onDragStart = {
-                            onFocus()
-                            w = sizeHolder.value.width
-                            h = sizeHolder.value.height
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            w = (w + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
-                            h = (h + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
-                            onResize(Size(w, h))
-                        },
-                    )
-                },
-            contentAlignment = Alignment.BottomEnd,
-        ) {
+        if (!window.isMinimized) {
             Box(
                 modifier = Modifier
-                    .padding(3.dp)
-                    .size(12.dp)
-                    .background(
-                        color = if (window.isFocused) Color(0xFF58A6FF) else Color(0xFF6E7681),
-                        shape = RoundedCornerShape(2.dp),
-                    ),
-            )
+                    .align(Alignment.BottomEnd)
+                    .size(28.dp)
+                    .pointerInput(window.instanceId) {
+                        var w = sizeHolder.value.width
+                        var h = sizeHolder.value.height
+                        detectDragGestures(
+                            onDragStart = {
+                                onFocus()
+                                w = sizeHolder.value.width
+                                h = sizeHolder.value.height
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                w = (w + dragAmount.x).coerceAtLeast(WindowManager.MIN_WIDTH)
+                                h = (h + dragAmount.y).coerceAtLeast(WindowManager.MIN_HEIGHT)
+                                onResize(Size(w, h))
+                            },
+                        )
+                    },
+                contentAlignment = Alignment.BottomEnd,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(3.dp)
+                        .size(12.dp)
+                        .background(
+                            color = if (window.isFocused) Color(0xFF58A6FF) else Color(0xFF6E7681),
+                            shape = RoundedCornerShape(2.dp),
+                        ),
+                )
+            }
         }
     }
 }
