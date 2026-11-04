@@ -9,6 +9,7 @@ package com.minios.elizierdias.windows
 
 import android.content.Context
 import com.minios.elizierdias.core.NoskLog
+import com.minios.elizierdias.linux.LinuxManager
 import com.minios.elizierdias.linux.LinuxRuntime
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,9 +19,8 @@ import java.io.File
 /**
  * Gestor principal da camada Windows — Fase 2.
  *
- * - Instalação de Wine (e Box64 se disponível) via apt no Debian/PRoot
- * - Lançamento de EXE/MSI/BAT com WINEPREFIX
- * - Mapeamento de caminhos Android → Debian
+ * Instalação: se Linux não estiver pronto, corre fullSetup automaticamente.
+ * Lançamento: Wine via PRoot com mapeamento de caminhos.
  */
 class WindowsManager(
     private val context: Context,
@@ -30,6 +30,7 @@ class WindowsManager(
     private val associationEngine = FileAssociationEngine(context)
     private val processTracker = WindowsProcessTracker()
     private val linuxRuntime = LinuxRuntime(context)
+    private val linuxManager = LinuxManager(context)
 
     private val _isInstalled = MutableStateFlow(false)
     val isInstalled: StateFlow<Boolean> = _isInstalled.asStateFlow()
@@ -69,13 +70,8 @@ class WindowsManager(
         }
         if (!_isInstalled.value) {
             return LaunchResult.NeedsInstall(
-                "A camada Windows (Wine) ainda não está instalada. " +
-                    "Instale-a em Settings → Windows Compatibility.",
-            )
-        }
-        if (!linuxRuntime.isFullyReady()) {
-            return LaunchResult.Failure(
-                "Linux (RootFS + PRoot) não está pronto. Corre full-setup no Terminal primeiro.",
+                "A camada Windows ainda não está instalada. " +
+                    "Usa o botão em Settings → Windows Compatibility.",
             )
         }
         return LaunchResult.ConfirmationRequired(
@@ -84,9 +80,6 @@ class WindowsManager(
         )
     }
 
-    /**
-     * Executa o ficheiro depois da confirmação do utilizador.
-     */
     suspend fun launchConfirmed(
         file: File,
         prefixName: String = WindowsConfig.DEFAULT_PREFIX_NAME,
@@ -96,14 +89,17 @@ class WindowsManager(
             return LaunchResult.NeedsInstall("Camada Windows não instalada")
         }
         if (!linuxRuntime.isFullyReady()) {
-            return LaunchResult.Failure("Linux não está pronto (RootFS + PRoot)")
+            return LaunchResult.Failure(
+                "Linux ainda não está pronto. Volta a Settings e instala a camada Windows " +
+                    "(faz o setup do Linux automaticamente).",
+            )
         }
 
         val name = displayName ?: file.nameWithoutExtension
         val guestExe = WindowsConfig.hostPathToGuest(file.absolutePath)
         val guestPrefix = WindowsConfig.guestPrefixPath(prefixName)
+        val quotedExe = shellQuote(guestExe)
 
-        // Garante estrutura do prefixo no host
         prefixManager.getPrefix(prefixName)
 
         val processId = processTracker.register(
@@ -120,14 +116,13 @@ class WindowsManager(
         val ext = file.extension.lowercase()
         val wineCmd = when (ext) {
             "bat", "cmd" ->
-                "WINEPREFIX=$guestPrefix wine cmd /c $(shellQuote(guestExe))"
+                "WINEPREFIX=$guestPrefix wine cmd /c $quotedExe"
             "msi" ->
-                "WINEPREFIX=$guestPrefix wine msiexec /i $(shellQuote(guestExe))"
+                "WINEPREFIX=$guestPrefix wine msiexec /i $quotedExe"
             else ->
-                "WINEPREFIX=$guestPrefix wine $(shellQuote(guestExe))"
+                "WINEPREFIX=$guestPrefix wine $quotedExe"
         }
 
-        // Corre em background relativamente longo; captura saída para log
         val result = linuxRuntime.exec(
             command = "export DISPLAY=:1; $wineCmd 2>&1",
             timeoutSec = 300,
@@ -144,29 +139,21 @@ class WindowsManager(
             } catch (_: Exception) {
             }
 
-            if (exec.exitCode == 0) {
-                _statusMessage.value = "Launched: $name"
-                NoskLog.i(NoskLog.RUNTIME, "Wine OK: $name")
-                LaunchResult.Success(processId)
-            } else {
-                // Muitos programas gráficos saem com código != 0 quando a sessão acaba;
-                // ainda assim registamos sucesso parcial se houver saída útil.
-                val snippet = (exec.stdout + "\n" + exec.stderr).take(400)
-                NoskLog.w(NoskLog.RUNTIME, "Wine exit ${exec.exitCode}: $snippet")
+            val snippet = (exec.stdout + "\n" + exec.stderr).take(400)
+            if (exec.exitCode != 0 &&
+                (snippet.contains("not found", ignoreCase = true) ||
+                    snippet.contains("No such file", ignoreCase = true))
+            ) {
                 processTracker.markFinished(processId)
-                if (snippet.contains("not found", ignoreCase = true) ||
-                    snippet.contains("No such file", ignoreCase = true)
-                ) {
-                    LaunchResult.Failure(
-                        "Wine não encontrou o ficheiro ou o próprio wine. " +
-                            "Verifica se o caminho está em /sdcard e se wine está instalado.",
-                        logSnippet = snippet,
-                    )
-                } else {
-                    // Considera lançado; o utilizador pode ter fechado a janela
-                    _statusMessage.value = "Wine terminou (exit ${exec.exitCode}): $name"
-                    LaunchResult.Success(processId)
-                }
+                LaunchResult.Failure(
+                    "Wine não encontrou o ficheiro ou o binário wine. " +
+                        "Garante que o EXE está em /sdcard (Download, etc.).",
+                    logSnippet = snippet,
+                )
+            } else {
+                _statusMessage.value = "Launched: $name"
+                NoskLog.i(NoskLog.RUNTIME, "Wine finished exit=${exec.exitCode}: $name")
+                LaunchResult.Success(processId)
             }
         } else {
             processTracker.markFinished(processId)
@@ -177,82 +164,92 @@ class WindowsManager(
     }
 
     /**
-     * Instalação real via apt no Debian do NoskOS.
+     * Um único botão: prepara Linux se preciso + instala Wine.
+     * O utilizador não precisa de abrir o Terminal.
      */
     suspend fun installRuntime(onProgress: (String) -> Unit = {}): Result<Unit> {
-        if (!linuxRuntime.isFullyReady()) {
-            val msg = "Linux (RootFS + PRoot) não está pronto. Corre 'full-setup' no Terminal primeiro."
-            _statusMessage.value = msg
+        fun prog(msg: String) {
             _installProgress.value = msg
             onProgress(msg)
-            return Result.failure(IllegalStateException(msg))
+            NoskLog.i(NoskLog.RUNTIME, "Windows install: $msg")
         }
 
         return try {
             WindowsConfig.ensureDirs(context)
             prefixManager.ensureDefaultPrefix()
 
-            fun prog(msg: String) {
-                _installProgress.value = msg
-                onProgress(msg)
-                NoskLog.i(NoskLog.RUNTIME, "Windows install: $msg")
+            // —— Auto Linux setup ——
+            if (!linuxRuntime.isFullyReady()) {
+                prog("[0/6] Linux não está pronto — a correr full-setup automático...")
+                _statusMessage.value = "A preparar Linux (automático)..."
+                linuxManager.initialize()
+                val setup = linuxManager.fullSetup()
+                if (setup.isFailure || !linuxRuntime.isFullyReady()) {
+                    val err = setup.exceptionOrNull()?.message
+                        ?: "full-setup não deixou o Linux pronto"
+                    prog("Falha no Linux: $err")
+                    _statusMessage.value = "Precisas de permissão de armazenamento e internet para o Linux."
+                    return Result.failure(IllegalStateException(err))
+                }
+                prog("[0/6] Linux OK")
             }
 
-            prog("[1/5] A atualizar índices apt...")
+            prog("[1/6] A atualizar índices apt...")
             linuxRuntime.exec("apt-get update -y", timeoutSec = 300)
 
-            prog("[2/5] A instalar wine...")
+            prog("[2/6] A instalar wine...")
             val wineResult = linuxRuntime.exec(
                 "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wine",
                 timeoutSec = 900,
             )
             if (wineResult.isFailure) {
-                val err = wineResult.exceptionOrNull()?.message ?: "apt wine failed"
-                prog("Falha wine: $err")
-                // Tenta wine64 / wine32 como fallback de nome de pacote
-                prog("[2b/5] A tentar pacotes alternativos (wine64)...")
+                prog("[2b/6] Fallback wine64/wine32...")
                 linuxRuntime.exec(
                     "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wine64 wine32 || true",
                     timeoutSec = 600,
                 )
             }
 
-            prog("[3/5] A verificar se wine está no PATH...")
-            val which = linuxRuntime.exec("which wine || which wine64 || echo MISSING", timeoutSec = 30)
+            prog("[3/6] A verificar wine no PATH...")
+            val which = linuxRuntime.exec(
+                "which wine || which wine64 || echo MISSING",
+                timeoutSec = 30,
+            )
             val winePath = which.getOrNull()?.stdout?.trim().orEmpty()
             if (winePath.isEmpty() || winePath.contains("MISSING")) {
-                val msg = "Wine não ficou disponível no PATH após apt. Verifica repositórios Debian."
+                val msg = "Wine não ficou no PATH. Verifica internet e repositórios Debian."
                 prog(msg)
                 return Result.failure(IllegalStateException(msg))
             }
-            prog("Wine encontrado: $winePath")
+            prog("Wine: $winePath")
 
-            prog("[4/5] A tentar box64 (opcional, para x86_64)...")
+            prog("[4/6] Box64 opcional...")
             linuxRuntime.exec(
                 "DEBIAN_FRONTEND=noninteractive apt-get install -y box64 2>/dev/null || true",
                 timeoutSec = 300,
             )
 
-            prog("[5/5] A inicializar prefixo default (wineboot)...")
+            prog("[5/6] wineboot no prefixo default...")
             val guestPrefix = WindowsConfig.guestPrefixPath()
             linuxRuntime.exec(
                 "export WINEPREFIX=$guestPrefix DISPLAY=:1; wineboot -u 2>&1 || wineboot 2>&1 || true",
                 timeoutSec = 180,
             )
 
-            // Marcadores
+            prog("[6/6] A gravar marcadores...")
             WindowsConfig.installedMarker(context).parentFile?.mkdirs()
-            WindowsConfig.installedMarker(context).writeText("wine:$winePath\n${System.currentTimeMillis()}")
+            WindowsConfig.installedMarker(context)
+                .writeText("wine:$winePath\n${System.currentTimeMillis()}")
             WindowsConfig.wineMarker(context).writeText(winePath)
 
             _isInstalled.value = true
             WindowsConfig.setEnabled(true)
-            _statusMessage.value = "Windows layer ready — Wine em $winePath"
-            prog("═══ Instalação concluída ═══")
+            _statusMessage.value = "Windows layer ready — $winePath"
+            prog("═══ Concluído ═══")
 
             Result.success(Unit)
         } catch (e: Exception) {
-            _statusMessage.value = "Falha na instalação: ${e.message}"
+            _statusMessage.value = "Falha: ${e.message}"
             _installProgress.value = "Erro: ${e.message}"
             NoskLog.e(NoskLog.RUNTIME, "Windows install failed", e)
             Result.failure(e)
