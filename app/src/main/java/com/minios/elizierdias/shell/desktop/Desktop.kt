@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -71,6 +70,7 @@ fun Desktop() {
     var startMenuOpen by remember { mutableStateOf(false) }
     var mouseEnabled by remember { mutableStateOf(true) }
     var desktopSizePx by remember { mutableStateOf(Size(1280f, 720f)) }
+    var browserStartUrl by remember { mutableStateOf<String?>(null) }
 
     val config = remember(context) { MiniOSConfig(context) }
 
@@ -81,15 +81,23 @@ fun Desktop() {
     val powerMode by config.powerMode.collectAsState(initial = PowerMode.BALANCED)
     val wallpaper = Wallpapers.byId(wallpaperId)
 
-    fun launchApp(app: MiniApp) {
+    fun launchApp(app: MiniApp, browserUrl: String? = null) {
         startMenuOpen = false
         if (app.id == "smartplay") {
             val intent = context.packageManager.getLaunchIntentForPackage("com.appplayysmartt")
             if (intent != null) context.startActivity(intent)
             else Toast.makeText(context, "SmartPlay nao esta instalado", Toast.LENGTH_SHORT).show()
-        } else {
-            windowManager.openApp(app, desktopSizePx)
+            return
         }
+        if (app.id == "browser") {
+            browserStartUrl = browserUrl
+        }
+        windowManager.openApp(app, desktopSizePx)
+    }
+
+    fun openInBrowser(url: String) {
+        browserStartUrl = url
+        windowManager.openApp(AppRegistry.browser, desktopSizePx)
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -132,7 +140,6 @@ fun Desktop() {
                     }
                 }
 
-                // Nao filtrar minimizadas: estado das apps sobrevive ao minimizar
                 windowManager.windows
                     .sortedBy { it.zIndex }
                     .forEach { window ->
@@ -142,16 +149,19 @@ fun Desktop() {
                                 onFocus = { windowManager.focus(window.instanceId) },
                                 onMove = { pos -> windowManager.move(window.instanceId, pos) },
                                 onResize = { size -> windowManager.resize(window.instanceId, size) },
-                                onClose = { windowManager.close(window.instanceId) },
+                                onClose = {
+                                    if (window.app.id == "browser") browserStartUrl = null
+                                    windowManager.close(window.instanceId)
+                                },
                                 onMinimize = { windowManager.minimize(window.instanceId) },
                                 onToggleMaximize = {
                                     windowManager.toggleMaximize(window.instanceId, desktopSizePx)
                                 },
                             ) {
                                 when (window.app.id) {
-                                    "files" -> FilesApp()
+                                    "files" -> FilesApp(onOpenInBrowser = { url -> openInBrowser(url) })
                                     "terminal" -> TerminalApp()
-                                    "browser" -> BrowserApp()
+                                    "browser" -> BrowserApp(startUrl = browserStartUrl)
                                     "settings" -> SettingsApp()
                                     "software_center" -> SoftwareCenterApp()
                                     "media_player" -> MediaPlayerOS()
