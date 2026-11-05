@@ -105,6 +105,26 @@ class LinuxGuiRuntime(
         }
     }
 
+    /**
+     * TigerVNC exige hostname resolvível. Em PRoot costuma falhar com:
+     * "Could not acquire fully qualified host name of this machine."
+     */
+    private suspend fun ensureHostname() {
+        runtime.exec(
+            """
+            |hostname noskos 2>/dev/null || true
+            |echo noskos > /etc/hostname 2>/dev/null || true
+            |cat > /etc/hosts << 'EOF'
+            |127.0.0.1   localhost noskos
+            |::1         localhost ip6-localhost ip6-loopback
+            |EOF
+            |grep -q noskos /etc/hosts 2>/dev/null || echo '127.0.0.1 noskos' >> /etc/hosts
+            |echo hostname_ok
+            """.trimMargin(),
+            timeoutSec = 15,
+        )
+    }
+
     private fun ensureStartVncScript(geo: String) {
         val bin = File(LinuxConfig.rootfsDir(context), "usr/local/bin").also { it.mkdirs() }
         val f = File(bin, "start-vnc")
@@ -112,6 +132,9 @@ class LinuxGuiRuntime(
             """
             |#!/bin/sh
             |export HOME=/root USER=root DISPLAY=:1
+            |hostname noskos 2>/dev/null || true
+            |echo noskos > /etc/hostname 2>/dev/null || true
+            |grep -q 'noskos' /etc/hosts 2>/dev/null || echo '127.0.0.1 localhost noskos' >> /etc/hosts
             |vncserver -kill :1 2>/dev/null || true
             |pkill -9 -f Xtigervnc 2>/dev/null || true
             |pkill -9 -f Xvnc 2>/dev/null || true
@@ -192,12 +215,14 @@ class LinuxGuiRuntime(
                     return@withContext Result.failure(IllegalStateException("RootFS/PRoot nao pronto"))
                 }
                 onProgress?.invoke("[GUI] A verificar pacotes...")
+                ensureHostname()
                 if (isVncInstalled()) {
                     ensurePersistentDirs()
                     ensureXstartup()
                     return@withContext Result.success("[GUI] TigerVNC ja instalado")
                 }
                 runtime.ensureDns()
+                // Mínimo necessário — sem recommends pesados
                 val pkgs =
                     "tigervnc-standalone-server tigervnc-common openbox xterm x11-xserver-utils"
                 runtime.exec("DEBIAN_FRONTEND=noninteractive apt-get update -y", timeoutSec = 300)
@@ -289,6 +314,7 @@ class LinuxGuiRuntime(
                     )
                 }
                 runtime.ensureDns()
+                ensureHostname()
                 ensurePersistentDirs()
                 ensureXstartup()
                 ensureVncPasswd()
@@ -319,8 +345,10 @@ class LinuxGuiRuntime(
                 }
 
                 cleanStaleLocks()
+                ensureHostname()
                 val cmd =
                     "export HOME=/root USER=root; " +
+                        "hostname noskos 2>/dev/null; " +
                         "vncserver $displayName -geometry $geo -depth 16 " +
                         "-localhost yes -SecurityTypes None " +
                         "-xstartup /root/.vnc/xstartup 2>&1"
