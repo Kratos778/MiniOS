@@ -50,12 +50,13 @@ fun LinuxDesktopApp() {
     var running by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var geometry by remember { mutableStateOf(gui.deviceGeometry()) }
-    var statusMsg by remember { mutableStateOf("A verificar…") }
+    var statusMsg by remember { mutableStateOf("A preparar Linux gráfico…") }
     var log by remember { mutableStateOf("") }
     var showControl by remember { mutableStateOf(false) }
+    var autoDone by remember { mutableStateOf(false) }
 
     fun append(line: String) {
-        log = (log + line + "\n").takeLast(4000)
+        log = (log + line + "\n").takeLast(5000)
     }
 
     fun runBusy(block: suspend () -> Unit) {
@@ -66,20 +67,88 @@ fun LinuxDesktopApp() {
                 block()
             } catch (e: Exception) {
                 append("[ERROR] ${e.message}")
+                statusMsg = "Erro: ${e.message}"
             } finally {
                 busy = false
             }
         }
     }
 
-    LaunchedEffect(Unit) {
+    /** Um único fluxo: Linux ready → pacotes VNC → iniciar sessão. */
+    suspend fun autoSetup() {
+        statusMsg = "A verificar Linux…"
+        append("[AUTO] initialize LinuxManager")
         manager.initialize()
+
+        if (!manager.getRuntime().isFullyReady()) {
+            statusMsg = "Linux base em falta — a correr full-setup…"
+            append("[AUTO] full-setup")
+            val setup = manager.fullSetup()
+            if (setup.isFailure || !manager.getRuntime().isFullyReady()) {
+                val err = setup.exceptionOrNull()?.message ?: "full-setup falhou"
+                statusMsg = "Falha no Linux: $err"
+                append("[ERROR] $err")
+                return
+            }
+            append("[AUTO] Linux ready")
+        }
+
         geometry = gui.deviceGeometry()
-        val st = gui.status()
-        running = st.running
-        statusMsg = st.message
-        append("[GUI] geometria: $geometry")
+        var st = gui.status()
         append(st.message)
+
+        if (st.running && !st.message.contains("stale", ignoreCase = true)) {
+            running = true
+            geometry = st.geometry
+            statusMsg = st.message
+            append("[AUTO] VNC já activo — a reutilizar")
+            return
+        }
+
+        statusMsg = "A instalar pacotes gráficos (VNC)…"
+        append("[AUTO] ensureGuiPackages")
+        val pkgs = gui.ensureGuiPackages { msg ->
+            append(msg)
+            statusMsg = msg.take(80)
+        }
+        if (pkgs.isFailure) {
+            val err = pkgs.exceptionOrNull()?.message ?: "pacotes falharam"
+            statusMsg = "Falha pacotes: $err"
+            append("[ERROR] $err")
+            return
+        }
+        append(pkgs.getOrNull() ?: "pacotes OK")
+
+        statusMsg = "A iniciar VNC $geometry…"
+        append("[AUTO] start VNC")
+        gui.stop()
+        val start = gui.start(geometry)
+        if (start.isSuccess) {
+            st = start.getOrNull()!!
+            running = true
+            geometry = st.geometry
+            statusMsg = "Linux gráfico pronto"
+            append(st.message)
+        } else {
+            running = false
+            val err = start.exceptionOrNull()?.message ?: "start falhou"
+            statusMsg = "VNC falhou: $err"
+            append("[ERROR] $err")
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (autoDone) return@LaunchedEffect
+        autoDone = true
+        busy = true
+        try {
+            autoSetup()
+        } catch (e: Exception) {
+            append("[ERROR] ${e.message}")
+            statusMsg = "Erro: ${e.message}"
+        } finally {
+            busy = false
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize().background(Color(0xFF0D1117))) {
@@ -108,7 +177,7 @@ fun LinuxDesktopApp() {
                 },
                 onInstallBrowser = {
                     runBusy {
-                        append("[GUI] A instalar Dillo/Links2 (browser leve)...")
+                        append("[GUI] A instalar Dillo/Links2...")
                         val r = gui.ensureLightBrowser { msg -> append(msg) }
                         if (r.isSuccess) append(r.getOrNull() ?: "OK")
                         else append("[ERROR] ${r.exceptionOrNull()?.message}")
@@ -116,25 +185,14 @@ fun LinuxDesktopApp() {
                 },
                 onStart = {
                     runBusy {
-                        // Soft start: se ja estiver activo e saudavel, nao mata a sessao.
-                        // Hard reset so se parado ou stale.
-                        val current = gui.status()
-                        if (current.running && !current.message.contains("stale", ignoreCase = true)) {
-                            running = true
-                            geometry = current.geometry
-                            statusMsg = current.message
-                            append("[GUI] VNC ja activo — a reutilizar sessao (sem reset)")
-                            append(current.message)
-                            return@runBusy
-                        }
-                        append("[GUI] Reset + iniciar VNC $geometry...")
+                        append("[GUI] Iniciar VNC $geometry...")
                         gui.stop()
                         val r = gui.start(geometry)
                         if (r.isSuccess) {
                             val st = r.getOrNull()!!
                             running = true
                             geometry = st.geometry
-                            statusMsg = st.message
+                            statusMsg = "Linux gráfico pronto"
                             append(st.message)
                         } else {
                             running = false
@@ -159,6 +217,9 @@ fun LinuxDesktopApp() {
                         append(st.message)
                     }
                 },
+                onAuto = {
+                    runBusy { autoSetup() }
+                },
                 onLaunchTerm = {
                     runBusy {
                         val r = gui.runApp("xterm -geometry 160x40 -ls -title 'NoskOS Terminal'")
@@ -174,6 +235,34 @@ fun LinuxDesktopApp() {
                     }
                 },
             )
+        }
+
+        if (!running && !busy) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            ) {
+                Text(
+                    "Linux gráfico parado ou falhou a arrancar.",
+                    color = Color(0xFFC9D1D9),
+                    fontSize = 13.sp,
+                )
+                Text(
+                    statusMsg,
+                    color = Color(0xFF8B949E),
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Text(
+                    "Toca em ⚙ Controlo → Auto (ou Iniciar).",
+                    color = Color(0xFF58A6FF),
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .clickable { showControl = true },
+                )
+            }
         }
 
         RfbViewer(
@@ -200,23 +289,35 @@ private fun ThinBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(36.dp)
+            .height(40.dp)
             .background(Color(0xFF161B22))
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f),
+        ) {
             Text(
-                text = if (running) "●" else "○",
-                color = if (running) Color(0xFF3FB950) else Color(0xFF8B949E),
+                text = when {
+                    busy -> "…"
+                    running -> "●"
+                    else -> "○"
+                },
+                color = when {
+                    busy -> Color(0xFFD29922)
+                    running -> Color(0xFF3FB950)
+                    else -> Color(0xFF8B949E)
+                },
                 fontSize = 12.sp,
             )
             Text(
-                text = " $port  $geometry",
+                text = " $port  $geometry  ${statusMsg.take(40)}",
                 color = Color(0xFF8B949E),
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
+                maxLines = 1,
                 modifier = Modifier.padding(start = 4.dp),
             )
         }
@@ -240,6 +341,7 @@ private fun ControlPanel(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onRefresh: () -> Unit,
+    onAuto: () -> Unit,
     onLaunchTerm: () -> Unit,
     onLaunchBrowser: () -> Unit,
 ) {
@@ -255,6 +357,7 @@ private fun ControlPanel(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            SmallBtn("Auto", Color(0xFF238636), busy, onAuto)
             SmallBtn("Pacotes", Color(0xFF1F6FEB), busy, onInstall)
             SmallBtn("+Dillo", Color(0xFF6E40C9), busy, onInstallBrowser)
             SmallBtn("Iniciar", Color(0xFF238636), busy, onStart)
@@ -271,7 +374,7 @@ private fun ControlPanel(
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(72.dp)
+                    .height(90.dp)
                     .padding(top = 6.dp)
                     .verticalScroll(rememberScrollState()),
             )
